@@ -1,0 +1,9 @@
+node_modules/
+/dist/
+/build/
+/.mygo/
+mygo_windows_*.syso
+/mygo-demo
+*.dmg
+.DS_Store
+/mygo-demo.exe
