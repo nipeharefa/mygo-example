@@ -30,7 +30,9 @@ the window instead — same result on screen, one more step to set up.
 ### macOS: the app is the NDI source
 
 1. Install the NDI Runtime, which ships with [NDI Tools](https://ndi.video/tools/).
-   Without it the app has nothing to load and the button reports an error.
+   Without it the app has nothing to load and the button reports an
+   error. The app looks for `/usr/local/lib/libndi.dylib`, where the
+   installer puts it.
 2. Launch the app, sign in, then press **Start NDI** in the header. (Or
    start it with `MYGO_NDI=1` in the environment.)
 3. In OBS add an **NDI Source**, or open NDI Video Monitor, and pick
@@ -47,17 +49,22 @@ does the same.
 The Windows build has no **Start NDI** button — it cannot publish NDI
 itself. To get the picture into OBS, and from there onto the network:
 
-1. Install [OBS Studio](https://obsproject.com) (30 or newer).
-2. Install the **NDI Runtime** from [NDI Tools](https://ndi.video/tools/).
-   The NDI plugin cannot load without it.
+1. Install [OBS Studio](https://obsproject.com) **31.1.1 or newer**: the
+   current NDI plugin refuses older releases.
+2. Install the **NDI Runtime 6.3 or newer** from
+   [NDI Tools](https://ndi.video/tools/). It is a separate download, and
+   the plugin cannot load without it.
 3. Install the NDI plugin for OBS,
    [DistroAV](https://github.com/DistroAV/DistroAV/releases) (formerly
-   obs-ndi), and restart OBS.
+   obs-ndi), either with `winget install DistroAV.DistroAV` or by running
+   the `distroav-<version>-windows-x64-Installer.exe` release asset. It
+   publishes Windows x64 only, and needs a restart of OBS.
 4. In OBS, under **Sources**, press **+** → **Window Capture** → window
    `Kubernetes`. Leave the capture method on **Windows 10 (1903 and up)**.
 5. To publish that source to other machines, right-click it → **Filters**
-   → **+** → **NDI Output** and give it a name. For the whole program
-   feed instead, use **Tools** → **NDI Output Settings**.
+   → **+** → **NDI Output** (DistroAV also calls it *NDI Dedicated
+   Output*) and give it a name. For the whole program feed instead, use
+   **Tools** → **NDI Output Settings**.
 
 If you only need the window inside OBS on the same machine, steps 2 to 5
 are unnecessary — plain **Window Capture** is enough, and NDI is only
@@ -68,8 +75,8 @@ another app.
 
 Neither the app nor OBS publishes NDI out of the box here, and the app
 has no NDI support on Linux at all. Use OBS **Window Capture** (X11; on
-Wayland, capture through the desktop portal). Add the NDI plugin the same
-way as on Windows if the feed has to leave the machine.
+Wayland, capture through the desktop portal), and install DistroAV from
+Flatpak or its `.deb` release asset if the feed has to leave the machine.
 
 ## Build from source
 
