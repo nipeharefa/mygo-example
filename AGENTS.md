@@ -46,9 +46,12 @@ and identity rules live in
 - **NDI output is macOS-only and stays pure Go.** `ndi_darwin.go` binds
   the NDI runtime and CoreGraphics through `purego` (no cgo, no SDK
   headers); `ndi_other.go` is the stub that keeps the Windows and Linux
-  builds compiling. Start and stop the sender from main-thread callbacks
-  (`OnClick`, `WhenReady`, `OnQuit`), never from the build pass, and never
-  read the window's AppKit objects from the capture goroutine.
+  builds compiling. `ndiSupported()` gates the header toggle, so a build
+  without a sender shows no button and treats `MYGO_NDI=1` as nothing to
+  do — keep it that way, since a Windows tester has no NDI runtime. Start
+  and stop the sender from main-thread callbacks (`OnClick`, `WhenReady`,
+  `OnQuit`), never from the build pass, and never read the window's AppKit
+  objects from the capture goroutine.
 
 ## Commands
 
@@ -77,12 +80,12 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | Path | What |
 | --- | --- |
 | `main.go` | The app: `app` state, `resources`/`groups` dummy data, the view tree, `main()`, the NDI toggle. |
-| `main_test.go` | The headless view tests: sign-in gate, validation, Enter submit, sign-out, kind switching, the NDI toggle without a window. |
+| `main_test.go` | The headless view tests: sign-in gate, validation, Enter submit, sign-out, kind switching, the NDI toggle without a window, and its off-macOS absence. |
 | `ndi_darwin.go` | The NDI sender: `CGWindowListCreateImage` capture of our own window through `purego`, then `gondi` frames. |
-| `ndi_other.go` | The `!darwin` stub that keeps Windows and Linux builds compiling; starting NDI there returns an error. |
+| `ndi_other.go` | The `!darwin` stub: keeps Windows and Linux builds compiling, hides the toggle and ignores a start. |
 | `mygo.config.ts` | Packaging: name, identifier, output directory. `devUrl`, `devCommand`, `buildCommand` and `frontendDist` are inert for a native view. |
 | `src/`, `index.html`, `vite.config.ts` | Leftover web template; nothing renders it. |
-| `.github/workflows/ci.yml` | The test gate and the macOS/Windows/Linux packaging matrix. |
+| `.github/workflows/ci.yml` | The test gate, a native Windows run that launches the binary, and the macOS/Windows/Linux packaging matrix. |
 | `docs/architecture.md` | How the app works; read this next. |
 | `docs/superpowers/plans/` | Historical, already-implemented plan; its numbers have drifted from the code. |
 

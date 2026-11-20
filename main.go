@@ -405,14 +405,22 @@ func (a *app) header(c *ui.Context, k *resourceKind) {
 		ui.Select(c, &a.namespace, namespaces).Width(160)
 		ui.Button(c, "Refresh")
 		ui.PrimaryButton(c, "Create")
-		ui.Button(c, a.ndiLabel()).OnClick(a.toggleNDI)
+		// Only a macOS build can publish the window, so the button is not
+		// offered where clicking it could never work.
+		if ndiSupported() {
+			ui.Button(c, a.ndiLabel()).OnClick(a.toggleNDI)
+		}
 		ui.Button(c, "Sign out").OnClick(a.signOut)
 	})
 }
 
 // startNDI publishes the window as an NDI source and keeps the error, if
-// any, for the line under the header.
+// any, for the line under the header. A build without a sender ignores the
+// request: MYGO_NDI=1 on another platform is not an error, just nothing.
 func (a *app) startNDI() error {
+	if !ndiSupported() {
+		return nil
+	}
 	if a.ndi != nil {
 		return nil
 	}

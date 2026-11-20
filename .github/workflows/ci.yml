@@ -37,6 +37,39 @@ jobs:
       - name: Test
         run: CGO_ENABLED=0 go test ./...
 
+  windows:
+    name: Test on Windows
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Check formatting
+        shell: bash
+        run: test -z "$(gofmt -l *.go)"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        env:
+          CGO_ENABLED: "0"
+        run: go test ./...
+      # Cross-compiling only says the code builds for Windows. Starting the
+      # binary says it runs there: a missing DLL or a crash on window
+      # creation shows up as an early exit.
+      - name: Launch the app
+        shell: pwsh
+        run: |
+          go build -o mygo-demo.exe .
+          $app = Start-Process -FilePath .\mygo-demo.exe -PassThru
+          Start-Sleep -Seconds 8
+          if ($app.HasExited) {
+            throw "mygo-demo exited with code $($app.ExitCode)"
+          }
+          $app.Kill()
+          "mygo-demo started and stayed up"
+
   build:
     name: ${{ matrix.name }}
     needs: test

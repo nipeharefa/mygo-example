@@ -150,6 +150,9 @@ func TestSignOut(t *testing.T) {
 // Starting NDI without a window, as in a headless test, reports the
 // problem instead of streaming, and the button stays on Start.
 func TestNDIToggleWithoutWindow(t *testing.T) {
+	if !ndiSupported() {
+		t.Skip("this build has no NDI sender")
+	}
 	a := newApp()
 	tt := ui.NewTester(a.view, 1180, 720)
 	signIn(t, a, tt)
@@ -181,6 +184,24 @@ func TestStopNDIWithoutSender(t *testing.T) {
 	a.stopNDI()
 	if a.ndi != nil || a.ndiErr != "" {
 		t.Fatalf("stop changed state: %v %q", a.ndi, a.ndiErr)
+	}
+}
+
+// A build without a sender offers no button to press and treats a start
+// request as nothing to do, so MYGO_NDI=1 stays quiet away from macOS.
+func TestNDIHiddenWithoutSender(t *testing.T) {
+	if ndiSupported() {
+		t.Skip("this build can publish")
+	}
+	a := newApp()
+	tt := ui.NewTester(a.view, 1180, 720)
+	signIn(t, a, tt)
+
+	if tt.HasText("Start NDI") {
+		t.Fatalf("the header offered a toggle this build cannot honour: %q", tt.Texts())
+	}
+	if err := a.startNDI(); err != nil || a.ndi != nil || a.ndiErr != "" {
+		t.Fatalf("startNDI on a build without a sender: err=%v ndi=%v ndiErr=%q", err, a.ndi, a.ndiErr)
 	}
 }
 

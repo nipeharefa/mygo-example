@@ -16,6 +16,10 @@ import (
 	"github.com/egoist/mygo"
 )
 
+// ndiSupported reports whether this build can publish the window. The
+// header only offers the toggle where it is true.
+func ndiSupported() bool { return true }
+
 // ndiLibraryPath is where the NDI runtime installs on macOS; gondi looks
 // for the same path.
 const ndiLibraryPath = "/usr/local/lib/libndi.dylib"

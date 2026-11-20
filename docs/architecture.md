@@ -174,8 +174,10 @@ On macOS the window can publish itself as an NDI source, so OBS (with
 obs-ndi) or any other NDI receiver can take the live app as a video
 input. The header's "Start NDI" / "Stop NDI" button toggles it, and
 `MYGO_NDI=1` starts it on launch. `ndi_other.go` is the `!darwin` stub:
-the Windows and Linux builds compile, and starting there returns
-"NDI output is only available on macOS".
+the Windows and Linux builds compile, `ndiSupported()` returns false
+there, the header leaves the toggle out, and a start request is quietly
+ignored rather than failing. That matters for testers: a Windows beta has
+no NDI runtime, so the button must not be a dead end.
 
 Three pieces, all in `ndi_darwin.go`:
 
@@ -359,12 +361,14 @@ and `Type`/`Key` drive the focused input.
   proves the row reset.
 - `TestNDIToggleWithoutWindow` — clicking "Start NDI" with no window
   fails into `a.ndiErr` instead of panicking, the strip renders, and the
-  button stays "Start NDI".
+  button stays "Start NDI". Skips on a build without a sender.
+- `TestNDIHiddenWithoutSender` — the off-macOS counterpart: the header
+  offers no toggle and `startNDI` is a quiet no-op. Skips on macOS.
 - `TestStopNDIWithoutSender` — `stopNDI` with nothing running is a no-op.
 
-The two NDI tests are platform-independent by design: the error path is
-the one thing a headless tester can prove, and it is the path a Mac
-without NDI Tools takes. A real stream is verified by hand (see
+The NDI pair is written so each build runs exactly one of them: the error
+path is the one thing a headless tester can prove, and it is the path a
+Mac without NDI Tools takes. A real stream is verified by hand (see
 "Verification").
 
 The helper `signIn` sets the two fields and clicks "Sign in", so tests
@@ -405,10 +409,14 @@ go run .                     # manual check: sidebar, table, inspector
 MYGO_NDI=1 go run .          # ...and an NDI source in OBS / NDI Monitor
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same gate plus darwin/windows
-cross-compiles, then packages the app for macOS, Windows and Linux as
-artifacts. In a sandboxed agent session, set `GOCACHE` to a writable
-directory; the default `~/Library/Caches/go-build` is denied.
+CI (`.github/workflows/ci.yml`) runs the same gate on Linux, plus a
+native Windows job that repeats it and then builds `mygo-demo.exe`,
+starts it and fails if it has exited after eight seconds — a proxy for
+"this binary runs on Windows", which a cross-compile alone cannot claim.
+Both jobs then feed the packaging matrix, which packages the app for
+macOS, Windows and Linux as artifacts. In a sandboxed agent session, set
+`GOCACHE` to a writable directory; the default `~/Library/Caches/go-build`
+is denied.
 
 A cross-compile to Linux without `CGO_ENABLED=0` fails inside the
 standard library ("implicit declaration of function 'setresgid'"), which
@@ -460,7 +468,8 @@ Recorded as observed state, not as a work list:
    choice. The window number is read once at start, so a recreated window
    needs a stop/start, and the source name comes from the NDI runtime's
    machine prefix. `gondi` is pinned at v0.0.2 (2023), which is the only
-   NDI binding here that avoids cgo; it is unsupported on Windows.
+   NDI binding here that avoids cgo; it is unsupported on Windows, so the
+   Windows and Linux builds hide the toggle and send nothing.
 8. **Version coupling.** Everything here describes MyGo **v0.10.0**.
    After an upgrade, re-read `ui/doc.go` in the new module and the
    skill's migration note before trusting the API shapes in this file.
