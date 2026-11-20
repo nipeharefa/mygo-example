@@ -119,12 +119,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The installers carry the version from mygo.config.ts, so a tag that
-      # disagrees would publish files named after a different release.
+      # disagrees would publish files named after a different release. A
+      # prerelease tag (v0.1.0-beta.1) matches the same base version.
       - name: Check the tag against mygo.config.ts
         run: |
           want="${GITHUB_REF_NAME#v}"
           got=$(sed -n 's/.*version: "\(.*\)".*/\1/p' mygo.config.ts)
-          if [ "$want" != "$got" ]; then
+          if [ "${want%%-*}" != "${got%%-*}" ]; then
             echo "tag $GITHUB_REF_NAME does not match version \"$got\" in mygo.config.ts"
             exit 1
           fi
