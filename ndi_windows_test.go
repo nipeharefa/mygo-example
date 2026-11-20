@@ -50,7 +50,7 @@ func TestNDIFrameLayout(t *testing.T) {
 		t.Errorf("ndiSendCreate.clockVideo is at offset %d, NDI expects %d", got, want)
 	}
 	if got, want := unsafe.Sizeof(create), uintptr(24); got != want {
-		t.Errorf("ndiSendCreate is %d bytes, NDI expects 24", got)
+		t.Errorf("ndiSendCreate is %d bytes, NDI expects %d", got, want)
 	}
 }
 
@@ -58,10 +58,11 @@ func TestNDIFrameLayout(t *testing.T) {
 // and a machine may have only one of them. Missing the runtime case means
 // the app claims NDI is not installed on a machine that has it.
 func TestNDICandidatesCoverBothInstallers(t *testing.T) {
-	candidates := ndiDLLCandidates()
+	candidates := ndiLibraryCandidates()
 	for _, want := range []string{
 		filepath.Join(`C:\Program Files`, "NDI", "NDI 6 Runtime", ndiDLLName()),
 		filepath.Join(`C:\Program Files`, "NDI", "NDI 6 Tools", "Runtime", ndiDLLName()),
+		filepath.Join(`C:\Program Files`, "NDI", "NDI 5 Runtime", ndiDLLName()),
 	} {
 		if !slices.Contains(candidates, want) {
 			t.Errorf("the candidate list has no %s; it has %v", want, candidates)
@@ -80,17 +81,8 @@ func TestNDIRejectsForeignLibrary(t *testing.T) {
 		t.Fatalf("loading kernel32: %v", err)
 	}
 	defer syscall.FreeLibrary(handle)
-	if _, err := resolveNDI(handle); err == nil {
+	if _, err := bindNDI(uintptr(handle)); err == nil {
 		t.Fatal("a library without NDI entry points should not resolve")
-	}
-}
-
-// The table indices are the ABI, so a wrong constant would call into the
-// middle of the struct and take the process down on the first frame.
-func TestNDITableIndices(t *testing.T) {
-	if ndiTableInitialize != 0 || ndiTableSendCreate != 8 || ndiTableSendDestroy != 9 || ndiTableSendVideo != 50 {
-		t.Fatalf("table indices drifted: initialize %d, send_create %d, send_destroy %d, send_video %d",
-			ndiTableInitialize, ndiTableSendCreate, ndiTableSendDestroy, ndiTableSendVideo)
 	}
 }
 

@@ -6,30 +6,52 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"sync"
-	"time"
 	"unsafe"
 
-	"github.com/bitfocus/gondi"
 	"github.com/ebitengine/purego"
-	"github.com/egoist/mygo"
 )
 
-// ndiSupported reports whether this build can publish the window. The
-// header only offers the toggle where it is true.
-func ndiSupported() bool { return true }
+// ndiLibraryCandidates is where the NDI runtime installs on macOS, most
+// specific first; the bare name lets dyld search the usual paths.
+func ndiLibraryCandidates() []string {
+	return []string{
+		"/usr/local/lib/libndi.dylib",
+		"/Library/NDI SDK for Apple/lib/macOS/libndi.dylib",
+		"libndi.dylib",
+	}
+}
 
-// ndiLibraryPath is where the NDI runtime installs on macOS; gondi looks
-// for the same path.
-const ndiLibraryPath = "/usr/local/lib/libndi.dylib"
+// ndiInstallHint names the file a missing install should have.
+func ndiInstallHint() string {
+	return "/usr/local/lib/libndi.dylib"
+}
 
-// ndiSourceName is the name OBS and the NDI tools list as a source.
-const ndiSourceName = "mygo-demo (Kubernetes)"
+// ndiCaptureFailure explains a window that gave no pixels.
+func ndiCaptureFailure() string {
+	return "cannot read the window's pixels while it is off screen; bring the window into view to start the stream"
+}
 
-// ndiFrameRate paces the capture loop: the sender blocks until the frame
-// clock allows the next frame, so the loop cannot outrun it.
-const ndiFrameRate = 30
+// openNDILibrary loads the NDI runtime through purego's dlopen.
+func openNDILibrary(path string) (uintptr, error) {
+	return purego.Dlopen(path, purego.RTLD_NOW|purego.RTLD_GLOBAL)
+}
+
+// closeNDILibrary releases the runtime on Stop.
+func closeNDILibrary(handle uintptr) {
+	_ = purego.Dlclose(handle)
+}
+
+// ndiSymbol looks one entry point up by name.
+func ndiSymbol(handle uintptr, name string) (uintptr, error) {
+	return purego.Dlsym(handle, name)
+}
+
+// captureFrame reads one image of the window; CoreGraphics is safe to call
+// from the capture goroutine.
+func captureFrame(c ndiCapturer) (windowFrame, bool) {
+	return c.capture()
+}
 
 const (
 	cgFrameworkPath = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
@@ -156,14 +178,6 @@ func loadObjC() error {
 	return objcErr
 }
 
-// windowFrame is one captured image, top row first, four BGRA bytes a
-// pixel.
-type windowFrame struct {
-	pix    []byte
-	stride int
-	w, h   int
-}
-
 // windowCapturer grabs one window's image on a background goroutine.
 type windowCapturer struct {
 	number uint32
@@ -192,7 +206,8 @@ func newWindowCapturer(handle uintptr) (*windowCapturer, error) {
 
 // capture renders the window as the window server shows it: an app reads
 // its own windows without the permission to record the screen. It reports
-// false while the window has no image (minimized, hidden, mid-resize).
+// false while the window has no image, which is what an off-screen window
+// (minimized, hidden, behind a full screen app, or in another Space) gives.
 func (c *windowCapturer) capture() (windowFrame, bool) {
 	// CGRectNull asks for the window's own bounds, shadow excluded.
 	null := cgRect{Origin: cgPoint{X: math.Inf(1), Y: math.Inf(1)}}
@@ -220,107 +235,4 @@ func (c *windowCapturer) capture() (windowFrame, bool) {
 	cgContextDrawImage(ctx, cgRect{Size: cgSize{W: float64(w), H: float64(h)}}, img)
 	cgContextRelease(ctx)
 	return c.frame, true
-}
-
-// ndiStream publishes a window as one NDI source until Stop.
-type ndiStream struct {
-	send *gondi.SendInstance
-	capt *windowCapturer
-	stop chan struct{}
-	done chan struct{}
-	once sync.Once
-}
-
-// initGondi loads the NDI library once. gondi panics when the library or a
-// symbol it binds is missing, so that becomes an error the window shows.
-func initGondi() error {
-	var err error
-	gondiOnce.Do(func() {
-		defer func() {
-			if r := recover(); r != nil {
-				err = fmt.Errorf("NDI library: %v", r)
-			}
-		}()
-		err = gondi.InitLibrary("")
-	})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-var gondiOnce sync.Once
-
-// startNDISender opens the NDI runtime and starts sending frames of win.
-func startNDISender(win *mygo.Window) (*ndiStream, error) {
-	if win == nil {
-		return nil, errors.New("NDI output needs the app window")
-	}
-	if _, err := os.Stat(ndiLibraryPath); err != nil {
-		return nil, fmt.Errorf("the NDI runtime is not installed (%s): install NDI Tools", ndiLibraryPath)
-	}
-	if err := initGondi(); err != nil {
-		return nil, err
-	}
-	capt, err := newWindowCapturer(win.NativeHandle())
-	if err != nil {
-		return nil, err
-	}
-	send, err := gondi.NewSendInstance(ndiSourceName, "", true, false)
-	if err != nil {
-		return nil, err
-	}
-	s := &ndiStream{
-		send: send,
-		capt: capt,
-		stop: make(chan struct{}),
-		done: make(chan struct{}),
-	}
-	go s.run()
-	return s, nil
-}
-
-// run captures and sends until Stop closes the stop channel. SendVideoFrame
-// blocks on the frame clock, which is what paces the loop.
-func (s *ndiStream) run() {
-	defer close(s.done)
-	frame := gondi.NewVideoFrameV2()
-	frame.FourCC = gondi.FourCCTypeBGRA
-	frame.FrameRateN = ndiFrameRate
-	frame.FrameRateD = 1
-	frame.FrameFormatType = gondi.FrameFormatProgressive
-	frame.Timecode = gondi.SendTimecodeSynthesize
-	for {
-		select {
-		case <-s.stop:
-			return
-		default:
-		}
-		shot, ok := s.capt.capture()
-		if !ok {
-			// Nothing to show right now (the window is minimized or
-			// hidden); the consumer keeps the last frame.
-			select {
-			case <-s.stop:
-				return
-			case <-time.After(time.Second / ndiFrameRate):
-			}
-			continue
-		}
-		frame.Xres = int32(shot.w)
-		frame.Yres = int32(shot.h)
-		frame.PictureAspectRatio = float32(shot.w) / float32(shot.h)
-		frame.Data = &shot.pix[0]
-		frame.LineStride = int32(shot.stride)
-		s.send.SendVideoFrame(frame)
-	}
-}
-
-// Stop stops the capture loop and removes the source from discovery.
-func (s *ndiStream) Stop() {
-	s.once.Do(func() {
-		close(s.stop)
-		<-s.done
-		_ = s.send.Destroy()
-	})
 }

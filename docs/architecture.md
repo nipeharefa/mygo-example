@@ -179,84 +179,96 @@ strip instead of crashing. `ndi_other.go` is the stub for the systems
 without a sender: it compiles the app, `ndiSupported()` returns false,
 the header leaves the toggle out, and a start request is quietly ignored.
 
-The shape is the same everywhere — capture a frame into BGRA, hand it to
-the NDI sender, and let the sender's video clock pace the loop — but each
-platform answers "how do I read my own window" differently:
+The NDI binding is **one file, `ndi_sender.go`, for every platform that
+has a sender** (`//go:build darwin || linux || windows`). It owns the
+whole library-facing half: finding the runtime, binding it, the sender
+lifecycle, and the frame loop. Each platform file then supplies only the
+two things that are actually platform-shaped: how to open and read symbols
+from a dynamic library, and how to read a frame of our own window.
 
-| File | Runtime binding | Capture | Notes |
-| --- | --- | --- | --- |
-| `ndi_darwin.go` | `gondi` (purego dlopen) | `CGWindowListCreateImage` via `purego` | Whole window at 1 pt/px, title bar included |
-| `ndi_windows.go` | `syscall.LoadLibrary` + `SyscallN` | GDI `PrintWindow` into a 32-bit DIB | Client area only; `BitBlt` fallback |
-| `ndi_linux.go` | `gondi` | `gdk_pixbuf_get_from_window` | Client area, X11; Wayland refuses |
+| File | Supplies |
+| --- | --- |
+| `ndi_sender.go` | Candidate walk, symbol binding, `startNDISender`, the frame loop, `Stop` |
+| `ndi_darwin.go` | `purego.Dlopen`/`Dlsym`; `CGWindowListCreateImage` capture, whole window at 1 pt/px, title bar included |
+| `ndi_windows.go` | `syscall.LoadLibrary`/`GetProcAddress`; GDI `PrintWindow` into a 32-bit DIB, client area |
+| `ndi_linux.go` | `purego.Dlopen`/`Dlsym`; `gdk_pixbuf_get_from_window`, client area, X11 |
+| `ndi_other.go` | Stub: `ndiSupported()` is false, so the toggle is hidden |
 
-Three pieces, as in `ndi_darwin.go`:
+**NDI 5 and 6 both work through the versioned function table.** A
+modern runtime does not export the individual functions at all; it
+exports load entry points that return a pointer to a struct of function
+pointers. That struct is append-only, so an entry keeps its index across
+releases. `loadNDI` therefore tries `NDIlib_v6_3_load`, then
+`NDIlib_v6_load`, then `NDIlib_v5_load`, and reads `initialize`,
+`send_create`, `send_destroy` and `send_send_video_v2` from indices 0, 8,
+9 and 50. Only if no load entry exists does it fall back to the named
+exports (`NDIlib_initialize`, `NDIlib_send_create`, `NDIlib_send_destroy`,
+`NDIlib_send_send_video_v2`) for an older runtime. `ndi_sender_test.go`
+proves the indices against a real runtime by loading it and comparing each
+table entry with the function the library also exports by name;
+`ndi_windows_test.go` pins the struct layouts.
 
-1. **Capture our own window.** `newWindowCapturer` reads the window number
-   with `objc_msgSend(handle, sel_registerName("windowNumber"))` — AppKit
-   is main-thread-only, so it runs in `WhenReady`/`OnClick`, never in the
-   capture goroutine. Per frame, `CGWindowListCreateImage` with
+`NDIlib_send_create_v2` does not exist in the SDK — the export is
+`NDIlib_send_create`, with the same four-field settings struct. Assuming
+the older `_v2` name was the bug that made Windows report "exports no
+NDIlib_send_create_v2", and depending on named exports was what would
+have broken the first NDI 6 install.
+
+The capture, per platform:
+
+1. **macOS: the whole window.** `newWindowCapturer` reads the window
+   number with `objc_msgSend(handle, sel_registerName("windowNumber"))` —
+   AppKit is main-thread-only, so that happens in `WhenReady`/`OnClick`.
+   Per frame, `CGWindowListCreateImage` with
    `includingWindow | boundsIgnoreFraming | nominalResolution` returns the
    window as the display shows it, title bar included, at 1 point per
-   pixel. This is the one capture route macOS grants an app without the
-   screen-recording permission, because the window is its own.
-2. **Draw it into BGRA.** `CGBitmapContextCreate` over a `w*4` buffer with
-   `kCGImageAlphaPremultipliedFirst | kCGImageByteOrder32Little`, then
-   `CGContextDrawImage`. That combination is NDI's BGRA; getting the alpha
-   or byte-order flag wrong yields inverted or garbage colors, not an
-   error. `CGContextSetInterpolationQuality` is set to none so a resize
-   scales rather than blurs.
-3. **Send it.** A goroutine builds one `gondi.VideoFrameV2` (FourCC
-   `BGRA`, 30/1, progressive, `SendTimecodeSynthesize`) and calls
-   `SendVideoFrame`, which blocks on the sender's frame clock. That
+   pixel. This is the one capture route an app gets without the
+   screen-recording permission, because the window is its own. The
+   catch: the window server only has an image of a window that is **on
+   screen**, so a minimized window, a window on another Space, or one
+   behind a full-screen app yields no image. That is not an error state
+   the code can fix, so the start fails with a message saying to bring
+   the window into view.
+2. **Windows: the client area.** `PrintWindow(hwnd, dc,
+   PW_RENDERFULLCONTENT)` into a top-down `CreateDIBSection` bitmap — the
+   same call the MyGo test hooks use — with `BitBlt` as a fallback, and
+   the fourth byte of every pixel forced to 0xff, since GDI leaves alpha
+   at zero and NDI would read that as transparent.
+3. **Linux: the client area.** The `GtkWindow*` from `NativeHandle` is
+   converted with `gtk_widget_get_window`, then
+   `gdk_pixbuf_get_from_window` reads the pixels. GDK is not thread safe,
+   so the capture goroutine wraps each frame in `mygo.RunOnMain`. Wayland
+   gives no readback for a window's own surface, so the start fails with
+   that message; X11 works.
+
+Then the shared half draws and sends:
+
+1. **Make it BGRA.** On macOS `CGBitmapContextCreate` over a `w*4`
+   buffer with `kCGImageAlphaPremultipliedFirst | kCGImageByteOrder32Little`
+   plus `CGContextDrawImage` produces NDI's BGRA directly; getting the
+   alpha or byte-order flag wrong yields inverted or garbage colors, not
+   an error. Linux converts RGBA from the pixbuf to BGRA, and Windows
+   reads the DIB, which is already BGRA.
+2. **Send it.** A goroutine fills one `ndiVideoFrame` (FourCC `BGRA`,
+   30/1, progressive, `SendTimecodeSynthesize`) and calls
+   `send_send_video_v2`, which blocks on the sender's frame clock. That
    blocking call **is** the frame pacer: no ticker, no sleep on success.
-
-`gondi` is a purego wrapper, so this needs no cgo and no NDI SDK headers:
-`InitLibrary` dlopens `/usr/local/lib/libndi.dylib` (the NDI Tools
-runtime) and the capture uses `purego` bindings to CoreGraphics and
-libobjc. Both libraries and every symbol are resolved lazily, and their
-panics are caught and turned into `ndiErr`, so a Mac without NDI Tools
-gets the error strip instead of a crash.
-
-The Windows build binds the NDI runtime by hand because `purego` has no
-`Dlopen` on Windows. An NDI 6 runtime does not export the individual
-functions, so `loadNDI` first looks for the versioned table
-(`NDIlib_v6_3_load`, then `NDIlib_v6_load`, then `NDIlib_v5_load`) and
-reads `initialize`, `send_create`, `send_destroy` and
-`send_send_video_v2` from indices 0, 8, 9 and 50. The table is
-append-only, so an entry keeps its index across releases, which is why the
-indices are constants — `TestNDITableIndices` guards them, and they were
-checked against a real runtime by comparing them with the functions the
-library also exports by name. Only if no table exists does it fall back to
-the named exports (`NDIlib_initialize`, `NDIlib_send_create`,
-`NDIlib_send_destroy`, `NDIlib_send_send_video_v2`) for an older runtime.
-Either way the calls go through `syscall.SyscallN`.
-
-`NDIlib_send_create_v2` is gone from the current SDK — the export is
-`NDIlib_send_create`, and it takes the same four-field settings struct.
-Assuming the older name is what a Windows runtime exports was the bug that
-made the app report "exports no NDIlib_send_create_v2".
-
-The DLL is looked for in `NDI_RUNTIME_DIR_V6`/`V5`, then the standalone
-runtime and NDI Tools install folders under `Program Files`, and only then
-by bare name on `PATH`, so an unrelated older copy cannot win. When a file
-is found but will not load, the error says so rather than reporting NDI as
-missing.
+   Every pointer is kept alive with `runtime.KeepAlive` until the call
+   returns, because the runtime reads the buffer during the call only.
 
 `ndiVideoFrame` and `ndiSendCreate` mirror the C structs field for field;
 `ndi_windows_test.go` pins every offset and size, because a wrong layout
-does not fail loudly — it makes the NDI runtime read garbage. Capture uses
-`PrintWindow(hwnd, dc, PW_RENDERFULLCONTENT)` into a top-down
-`CreateDIBSection` bitmap, the same call the MyGo test hooks use, and sets
-the fourth byte of each pixel to 0xff since GDI leaves alpha at zero and
-NDI would read that as transparent.
+does not fail loudly — it makes the NDI runtime read garbage. No cgo and
+no SDK headers are involved: `purego` covers macOS and Linux, and
+`syscall` covers Windows, where `purego` has no `Dlopen`.
 
-On Linux the `GtkWindow*` from `NativeHandle` is converted with
-`gtk_widget_get_window`, and `gdk_pixbuf_get_from_window` reads the
-client area. GDK is not thread safe, so the capture goroutine wraps each
-frame in `mygo.RunOnMain` — a per-frame round trip that blocks until the
-main loop has copied the pixels out. Wayland gives no readback for a
-window's own surface, so `gdk_pixbuf_get_from_window` returns null and the
-start fails with that message; X11 works.
+The runtime file is looked for in a fixed order, most specific first:
+`NDI_RUNTIME_DIR_V6`/`V5`/`NDI_RUNTIME_DIR`, then the standalone runtime
+and NDI Tools install folders (`Program Files\NDI\...` on Windows, the
+SDK's `lib/macOS` on macOS, the usual `lib` directories on Linux), and
+only then by bare name on the search path, so an unrelated older copy
+cannot win. When a file is found but will not bind, the error says so
+rather than reporting NDI as missing.
 
 `startNDI` records failure in `ndiErr` and leaves `ndi` nil; success
 clears the error. `stopNDI` is nil-safe, waits for the goroutine to
@@ -419,18 +431,25 @@ and `Type`/`Key` drive the focused input.
 - `TestNDIFrameLayout` (Windows only) — pins every field offset and the
   size of `ndiVideoFrame` and `ndiSendCreate` to what the NDI C ABI
   declares.
-- `TestNDITableIndices` (Windows only) — pins the four table indices the
-  binding calls through; a drifted index would call into the wrong entry.
+- `TestNDITableMatchesNamedExports` — loads a real NDI runtime when one
+  is installed, calls `NDIlib_v5_load`, and checks that table entries 0,
+  8, 9 and 50 are the same functions the library also exports by name.
+  That is the only automated proof the append-only indices are right; it
+  skips on a machine without NDI.
 - `TestNDIRejectsForeignLibrary` (Windows only) — resolving
   `kernel32.dll` fails as an error, so a non-NDI DLL is reported, not
   called.
+- `TestNDICandidatesCoverBothInstallers` (Windows only) — the standalone
+  runtime folder and the NDI Tools folder are both searched, and the bare
+  DLL name stays last.
 - `TestStopNDIWithoutSender` — `stopNDI` with nothing running is a no-op.
 
 The toggle pair is written so each build runs exactly one of them: the
 error path is the one thing a headless tester can prove, and it is the
 path a machine without NDI Tools takes. The real stream is verified by
-hand; on Windows that includes the layout test, because the C struct
-offsets are the part a compiler cannot check. See "Verification".
+hand; the table test covers the binding against whatever runtime is
+installed, and the Windows layout test covers the C struct offsets, which
+is the part a compiler cannot check. See "Verification".
 
 The helper `signIn` sets the two fields and clicks "Sign in", so tests
 that only need the dashboard do not retype the account.
@@ -534,23 +553,26 @@ Recorded as observed state, not as a work list:
    constants, there is no session persistence, rate limiting or password
    hashing, and the password sits in a plain `string`. It hides the
    dashboard from a casual look; it is not security.
-7. **NDI is a demo feed, fixed to one window, and unproven on Windows
-   and Linux.** The sender captures one window at 1 pixel per point, so a
-   maximized 4K window sends a large frame; it never scales to a broadcast
-   resolution and offers no audio, alpha or per-window choice. macOS sends
-   the window with its title bar, Windows and Linux the client area. The
-   window handle is read once at start, so a recreated window needs a
-   stop/start, and the source name carries the NDI runtime's machine
-   prefix. `gondi` is pinned at v0.0.2 (2023), the only NDI binding here
-   that avoids cgo, and only the Windows path bypasses it, with a
-   hand-written `syscall` binding. The Windows and Linux paths are
-   compiled, vetted and (on Windows) offset-tested in CI, but the only
-   platform where the stream has actually been watched in OBS is macOS;
-   check the other two on real hardware before trusting them in a demo.
-   Wayland cannot read a window's own pixels, so Linux NDI is X11 only.
+7. **NDI is a demo feed and is only proven on macOS.** The sender
+   captures one window at 1 pixel per point, so a maximized 4K window
+   sends a large frame; it never scales to a broadcast resolution and
+   offers no audio, alpha or per-window choice. Every platform needs the
+   NDI runtime installed, and NDI 5 and 6 both work because the runtime is
+   reached through the versioned table. macOS sends the window with its
+   title bar and **only while the window is on screen**: the window server
+   has no image of a minimized window, a window on another Space, or one
+   behind a full-screen app, so a full-screen OBS in its own Space blocks
+   its own input. Windows and Linux send the client area instead, with no
+   such restriction. The window handle is read once at start, so a
+   recreated window needs a stop/start, and the source name carries the
+   NDI runtime's machine prefix. The Windows and Linux paths are compiled,
+   vetted and (on Windows) offset-tested in CI, and the Windows box has
+   streamed into a Mac's OBS, but only macOS has had its local stream
+   pulled apart frame by frame; check the others on real hardware before
+   trusting them in a demo. Wayland cannot read a window's own pixels, so
+   Linux NDI is X11 only.
 8. **Version coupling.** Everything here describes MyGo **v0.10.0**.
    After an upgrade, re-read `ui/doc.go` in the new module and the
    skill's migration note before trusting the API shapes in this file.
    The unused web tooling (`mygo-cli`, `mygo-runtime`) still pins 0.7.x;
-   bump it with the Go module when packaging matters.
    bump it with the Go module when packaging matters.

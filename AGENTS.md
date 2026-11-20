@@ -44,22 +44,29 @@ and identity rules live in
   before the rebuild), never from inside the build pass.
 - **Do not edit `src/mygo.ts` by hand.** It is `mygo generate` output, and
   the web frontend is currently unused (see "Known state").
-- **NDI output stays pure Go, one file per platform.** `ndi_darwin.go`
-  binds the NDI runtime and CoreGraphics through `purego`;
-  `ndi_windows.go` loads the DLL with `syscall` and captures through GDI;
-  `ndi_linux.go` uses `gondi` plus GDK. No cgo, no SDK headers, no
-  third-party NDI package on Windows. `ndi_other.go` is the stub for the
-  remaining systems and is the only file with `ndiSupported() == false`.
-  Start and stop the sender from main-thread callbacks (`OnClick`,
-  `WhenReady`, `OnQuit`), never from the build pass. Every platform reads
-  native window objects, so touch them on the main thread only: Linux goes
-  through `mygo.RunOnMain` for each frame, because GDK is not thread safe.
-  `ndi_windows_test.go` pins the struct offsets the C ABI requires and the
-  four indices of the versioned function table; run `GOOS=windows go
-  vet ./...` before trusting a change there. Resolve the runtime through
-  that table first — an NDI 6 runtime does not export the individual
-  functions, and `NDIlib_send_create_v2` no longer exists in the SDK (the
-  export is `NDIlib_send_create`).
+- **NDI output stays pure Go, and the binding lives in one file.**
+  `ndi_sender.go` (`//go:build darwin || linux || windows`) owns the
+  library-facing half — runtime discovery, binding, sender lifecycle, the
+  frame loop — for every platform. Each platform file supplies only the
+  dynamic-library calls and the window capture: `ndi_darwin.go` uses
+  `purego` plus CoreGraphics, `ndi_windows.go` uses `syscall` plus GDI,
+  `ndi_linux.go` uses `purego` plus GDK. No cgo, no SDK headers, no
+  third-party NDI package. `ndi_other.go` is the stub for the remaining
+  systems and is the only file with `ndiSupported() == false`. Start and
+  stop the sender from main-thread callbacks (`OnClick`, `WhenReady`,
+  `OnQuit`), never from the build pass. Every platform reads native window
+  objects, so touch them on the main thread only: Linux goes through
+  `mygo.RunOnMain` for each frame, because GDK is not thread safe.
+  `ndi_windows_test.go` pins the struct offsets the C ABI requires;
+  `ndi_sender_test.go` pins the versioned table's indices against a real
+  runtime. Run `GOOS=windows go vet ./...` and `GOOS=linux go vet ./...`
+  before trusting a change there. Resolve the runtime through that table
+  first — NDI 6 runtimes do not export the individual functions, and
+  `NDIlib_send_create_v2` no longer exists in the SDK (the export is
+  `NDIlib_send_create`). On macOS the capture only works while the window
+  is on screen; that limit is the window server's, so report it instead of
+  working around it, and do not add an AppKit pixel readback — objc
+  struct-return through `purego` crashed.
 
 ## Commands
 
@@ -96,10 +103,12 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | --- | --- |
 | `main.go` | The app: `app` state, `resources`/`groups` dummy data, the view tree, `main()`, the NDI toggle. |
 | `main_test.go` | The headless view tests: sign-in gate, validation, Enter submit, sign-out, kind switching, and the NDI toggle without a window. |
-| `ndi_darwin.go` | The NDI sender: `CGWindowListCreateImage` capture of our own window through `purego`, then `gondi` frames. |
+| `ndi_sender.go` | The NDI half every platform shares: candidate walk, versioned-table binding with a named-export fallback, `startNDISender`, the frame loop, `Stop`. |
+| `ndi_sender_test.go` | Proves the table indices (0/8/9/50) match the functions a real installed runtime also exports by name; skips without NDI. |
+| `ndi_darwin.go` | `purego` dlopen/dlsym plus `CGWindowListCreateImage` capture of our own window, title bar included, 1 pt/px, on screen only. |
 | `ndi_windows.go` | The NDI sender: `syscall` binding of the NDI DLL plus GDI `PrintWindow` capture into a 32-bit DIB. |
 | `ndi_windows_test.go` | Pins the offsets of `ndiVideoFrame`/`ndiSendCreate` to what the C ABI declares; runs on the Windows CI job. |
-| `ndi_linux.go` | The NDI sender: `gondi`, and `gdk_pixbuf_get_from_window` capture marshalled onto the main thread with `mygo.RunOnMain`. |
+| `ndi_linux.go` | `purego` dlopen/dlsym plus `gdk_pixbuf_get_from_window` capture, marshalled onto the main thread with `mygo.RunOnMain`. |
 | `ndi_other.go` | The stub for every remaining system: compiles the app, hides the toggle and ignores a start. |
 | `README.md` | What a downloader needs: installers, the demo account, and the per-platform instructions for getting the window into OBS. Keep its NDI sections honest: the app publishes NDI on all three platforms, but needs the NDI runtime installed first. |
 | `mygo.config.ts` | Packaging: name, identifier, output directory. `devUrl`, `devCommand`, `buildCommand` and `frontendDist` are inert for a native view. |

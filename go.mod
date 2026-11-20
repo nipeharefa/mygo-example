@@ -3,7 +3,6 @@ module mygo-demo
 go 1.27.3
 
 require (
-	github.com/bitfocus/gondi v0.0.2
 	github.com/ebitengine/purego v0.11.1
 	github.com/egoist/mygo v0.10.0
 )

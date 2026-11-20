@@ -25,8 +25,9 @@ The builds are not signed. On macOS, right-click the app and choose
 ## Getting the window into OBS
 
 The app publishes itself as an NDI source on macOS, Windows and Linux.
-Each platform needs the NDI Runtime installed, and the app reports the
-missing runtime in a strip under the header instead of failing silently.
+Each platform needs the NDI Runtime installed (version 5 or 6), and the
+app reports a missing or unusable runtime in a strip under the header
+instead of failing silently.
 
 ### macOS: the app is the NDI source
 
@@ -42,6 +43,12 @@ missing runtime in a strip under the header instead of failing silently.
 4. The feed is the whole window at one pixel per point, title bar
    included: crop or scale it with an OBS transform.
 
+The window has to be **on screen** while it streams: macOS gives an app
+the image of its own window only while the window server shows it, so a
+minimized window, one on another Space, or one behind a full-screen app
+yields no frames and **Start NDI** says so. Keep OBS in a window rather
+than full screen when the app is the source.
+
 **Stop NDI** in the header unregisters the source, and quitting the app
 does the same.
 
@@ -50,9 +57,10 @@ does the same.
 1. Install the **NDI Runtime** from
    [NDI Tools](https://ndi.video/tools/). It has to be the x64 runtime;
    the installer puts `Processing.NDI.Lib.x64.dll` under
-   `C:\Program Files\NDI\NDI <version> Tools\Runtime` and sets
-   `NDI_RUNTIME_DIR_V6`. Without it the header reports that the runtime is
-   missing.
+   `C:\Program Files\NDI\NDI 6 Tools\Runtime` (or
+   `C:\Program Files\NDI\NDI 6 Runtime`) and sets
+   `NDI_RUNTIME_DIR_V6`. The app searches both folders. Without it the
+   header reports that the runtime is missing.
 2. Launch the app, sign in, then press **Start NDI** in the header. (Or
    start it with `MYGO_NDI=1` in the environment.)
 3. In OBS add an **NDI Source**, or open NDI Video Monitor, and pick

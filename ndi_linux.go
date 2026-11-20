@@ -5,32 +5,71 @@ package main
 import (
 	"errors"
 	"fmt"
-	"math"
+	"os"
+	"path/filepath"
 	"runtime"
-	"sync"
-	"time"
 	"unsafe"
 
-	"github.com/bitfocus/gondi"
 	"github.com/ebitengine/purego"
 	"github.com/egoist/mygo"
 )
 
 const (
-	ndiSourceName = "mygo-demo (Kubernetes)"
-	ndiFrameRate  = 30
-
 	gtkLibrary     = "libgtk-3.so.0"
 	gdkLibrary     = "libgdk-3.so.0"
 	gobjectLibrary = "libgobject-2.0.so.0"
 )
 
-// ndiLibraryPaths is where the NDI Linux runtime usually lands; the bare
-// name is tried first so an ld path setup still wins.
-var ndiLibraryPaths = []string{
-	"libndi.so",
-	"/usr/local/lib/libndi.so",
-	"/usr/lib/libndi.so",
+// ndiLibraryCandidates is where the NDI runtime usually lands. The bare
+// name comes after the install paths, so a copy left by another package
+// does not win over the one NDI Tools put down.
+func ndiLibraryCandidates() []string {
+	var paths []string
+	for _, env := range []string{ndiRuntimeDirV6, ndiRuntimeDirV5, ndiRuntimeDirAny} {
+		if dir := os.Getenv(env); dir != "" {
+			paths = append(paths, filepath.Join(dir, "libndi.so"))
+		}
+	}
+	return append(paths,
+		"libndi.so",
+		"/usr/local/lib/libndi.so",
+		"/usr/lib/libndi.so",
+		"/usr/lib/x86_64-linux-gnu/libndi.so",
+	)
+}
+
+// ndiInstallHint names the file a missing install should have.
+func ndiInstallHint() string {
+	return "libndi.so on the library path"
+}
+
+// ndiCaptureFailure explains a window that gave no pixels.
+func ndiCaptureFailure() string {
+	return "cannot read the window's pixels, which Wayland does not allow"
+}
+
+// openNDILibrary loads the NDI runtime through the C library loader.
+func openNDILibrary(path string) (uintptr, error) {
+	return purego.Dlopen(path, purego.RTLD_NOW|purego.RTLD_GLOBAL)
+}
+
+// closeNDILibrary releases the runtime on Stop.
+func closeNDILibrary(handle uintptr) {
+	_ = purego.Dlclose(handle)
+}
+
+// ndiSymbol looks one entry point up by name.
+func ndiSymbol(handle uintptr, name string) (uintptr, error) {
+	return purego.Dlsym(handle, name)
+}
+
+// captureFrame reads one image of the window on the main thread, because
+// GDK is not thread safe and the capture loop runs on its own goroutine.
+// RunOnMain runs the function straight away when it is already on the main
+// thread, so this also works from the start path.
+func captureFrame(c ndiCapturer) (frame windowFrame, ok bool) {
+	mygo.RunOnMain(func() { frame, ok = c.capture() })
+	return frame, ok
 }
 
 // gdkPixbuf is the bookkeeping for reading a window's pixels through GDK.
@@ -96,13 +135,6 @@ func loadGDK() (g *gdkPixbuf, err error) {
 		purego.RegisterFunc(b.addr, addr)
 	}
 	return g, nil
-}
-
-// windowFrame is one captured frame, in BGRA, as NDI expects it.
-type windowFrame struct {
-	pix    []byte
-	stride int
-	w, h   int
 }
 
 // windowCapturer copies the app's own window out of GDK. Every GDK call
@@ -180,117 +212,4 @@ func (c *windowCapturer) capture() (windowFrame, bool) {
 	runtime.KeepAlive(pixbuf)
 	c.frame.stride, c.frame.w, c.frame.h = outStride, pw, ph
 	return c.frame, true
-}
-
-// waitFrame retries capture until the window shows something. Main thread
-// only.
-func (c *windowCapturer) waitFrame(timeout time.Duration) (windowFrame, bool) {
-	deadline := time.Now().Add(timeout)
-	for {
-		if f, ok := c.capture(); ok {
-			return f, true
-		}
-		if time.Now().After(deadline) {
-			return windowFrame{}, false
-		}
-		time.Sleep(time.Second / ndiFrameRate)
-	}
-}
-
-// ndiStream is a running sender: one goroutine captures and sends until
-// Stop closes it.
-type ndiStream struct {
-	send *gondi.SendInstance
-	capt *windowCapturer
-	stop chan struct{}
-	done chan struct{}
-	once sync.Once
-}
-
-// ndiSupported reports whether this build can publish the window.
-func ndiSupported() bool { return true }
-
-// initGondi loads the NDI runtime once and turns gondi's panics into an
-// error, since a missing runtime is an ordinary case here.
-var gondiOnce sync.Once
-
-func initGondi() (err error) {
-	gondiOnce.Do(func() {
-		defer func() {
-			if r := recover(); r != nil {
-				err = fmt.Errorf("the NDI runtime is not installed, install NDI Tools: %v", r)
-			}
-		}()
-		for _, path := range ndiLibraryPaths {
-			if err = gondi.InitLibrary(path); err == nil {
-				return
-			}
-		}
-		err = fmt.Errorf("the NDI runtime is not installed, install NDI Tools: %v", err)
-	})
-	return err
-}
-
-// startNDISender captures the window this process owns and publishes it as
-// an NDI source. It must run on the main thread.
-func startNDISender(win *mygo.Window) (*ndiStream, error) {
-	if win == nil {
-		return nil, errors.New("no window to publish yet")
-	}
-	capt, err := newWindowCapturer(win.NativeHandle())
-	if err != nil {
-		return nil, err
-	}
-	if _, ok := capt.waitFrame(2 * time.Second); !ok {
-		return nil, errors.New("cannot read the window's pixels, which Wayland does not allow")
-	}
-	if err := initGondi(); err != nil {
-		return nil, err
-	}
-	send, err := gondi.NewSendInstance(ndiSourceName, "", true, false)
-	if err != nil {
-		return nil, fmt.Errorf("the NDI runtime refused to create a sender: %w", err)
-	}
-	s := &ndiStream{send: send, capt: capt, stop: make(chan struct{}), done: make(chan struct{})}
-	go s.run()
-	return s, nil
-}
-
-// run sends frames until Stop. Sending with the video clock on blocks
-// until the frame is due, which paces the loop at the frame rate.
-func (s *ndiStream) run() {
-	defer close(s.done)
-	frame := gondi.NewVideoFrameV2()
-	frame.FourCC = gondi.FourCCTypeBGRA
-	frame.FrameRateN, frame.FrameRateD = ndiFrameRate, 1
-	frame.FrameFormatType = gondi.FrameFormatProgressive
-	frame.Timecode = math.MaxInt64
-	for {
-		select {
-		case <-s.stop:
-			return
-		default:
-		}
-		var f windowFrame
-		var ok bool
-		mygo.RunOnMain(func() { f, ok = s.capt.capture() })
-		if !ok {
-			time.Sleep(time.Second / ndiFrameRate)
-			continue
-		}
-		frame.Xres, frame.Yres = int32(f.w), int32(f.h)
-		frame.PictureAspectRatio = float32(f.w) / float32(f.h)
-		frame.Data = &f.pix[0]
-		frame.LineStride = int32(f.stride)
-		s.send.SendVideoFrame(frame)
-	}
-}
-
-// Stop ends the stream and unregisters the source.
-func (s *ndiStream) Stop() {
-	s.once.Do(func() {
-		close(s.stop)
-		<-s.done
-		s.send.Destroy()
-	})
 }
