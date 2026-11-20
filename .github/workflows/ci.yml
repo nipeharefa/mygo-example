@@ -46,9 +46,8 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - name: Check formatting
-        shell: bash
-        run: test -z "$(gofmt -l *.go)"
+      # Formatting is checked on Linux: a Windows checkout rewrites the
+      # files with CRLF, which gofmt reports as unformatted.
       - name: Vet
         run: go vet ./...
       - name: Test
