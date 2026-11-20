@@ -66,7 +66,13 @@ go run .                         # opens the window for a manual check
 MYGO_NDI=1 go run .              # ...and publishes it as an NDI source
 bun run build                    # packages the app into build/
 bun run build -- -platform darwin/arm64,darwin/amd64
+git tag -a v0.1.0 -m "..." && git push origin v0.1.0   # publishes a release
 ```
+
+A `v*` tag runs the full gate and packaging matrix, then attaches the
+installers to a GitHub release. The tag's base version must match
+`version` in `mygo.config.ts`, and a hyphen (`v0.1.0-beta.1`) publishes a
+prerelease.
 
 `go tool mygo vet .` (the skill's command) does not work here: the pinned
 module ships no `mygo` tool, so plain `go vet ./...` is the gate.
