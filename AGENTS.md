@@ -26,7 +26,8 @@ and identity rules live in
   dark appearance both work.
 - **Verify against the pinned API, not memory.** Resolve the source with
   `go list -m -f '{{.Dir}}' github.com/egoist/mygo`, then read
-  `ui/doc.go` and the widget you are using. The app pins v0.7.4.
+  `ui/doc.go` and the widget you are using. The app pins v0.10.0 in
+  `go.mod`; `package.json` still points the unused web tooling at 0.7.x.
 - **Keep dummy data in `resources` and `groups`.** A kind needs at least
   one object, and its id must appear in a `groups` entry, or the sidebar
   cannot reach it.

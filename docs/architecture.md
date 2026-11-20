@@ -368,6 +368,8 @@ Recorded as observed state, not as a work list:
    constants, there is no session persistence, rate limiting or password
    hashing, and the password sits in a plain `string`. It hides the
    dashboard from a casual look; it is not security.
-7. **Version coupling.** Everything here describes MyGo **v0.7.4**. After
-   an upgrade, re-read `ui/doc.go` in the new module and the skill's
-   migration note before trusting the API shapes in this file.
+7. **Version coupling.** Everything here describes MyGo **v0.10.0**.
+   After an upgrade, re-read `ui/doc.go` in the new module and the
+   skill's migration note before trusting the API shapes in this file.
+   The unused web tooling (`mygo-cli`, `mygo-runtime`) still pins 0.7.x;
+   bump it with the Go module when packaging matters.
