@@ -3,6 +3,8 @@
 package main
 
 import (
+	"path/filepath"
+	"slices"
 	"testing"
 	"unsafe"
 )
@@ -48,6 +50,24 @@ func TestNDIFrameLayout(t *testing.T) {
 	}
 	if got, want := unsafe.Sizeof(create), uintptr(24); got != want {
 		t.Errorf("ndiSendCreate is %d bytes, NDI expects 24", got)
+	}
+}
+
+// The standalone NDI Runtime and NDI Tools install into different folders,
+// and a machine may have only one of them. Missing the runtime case means
+// the app claims NDI is not installed on a machine that has it.
+func TestNDICandidatesCoverBothInstallers(t *testing.T) {
+	candidates := ndiDLLCandidates()
+	for _, want := range []string{
+		filepath.Join(`C:\Program Files`, "NDI", "NDI 6 Runtime", ndiDLLName()),
+		filepath.Join(`C:\Program Files`, "NDI", "NDI 6 Tools", "Runtime", ndiDLLName()),
+	} {
+		if !slices.Contains(candidates, want) {
+			t.Errorf("the candidate list has no %s; it has %v", want, candidates)
+		}
+	}
+	if candidates[0] != ndiDLLName() {
+		t.Errorf("the bare DLL name should be tried first, so PATH wins; got %q", candidates[0])
 	}
 }
 

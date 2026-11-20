@@ -66,36 +66,55 @@ type ndiLibrary struct {
 	sendDestroy uintptr
 }
 
+// ndiDLLName is the runtime the installer leaves behind, per architecture.
+func ndiDLLName() string {
+	if runtime.GOARCH == "arm64" {
+		return "Processing.NDI.Lib.arm64.dll"
+	}
+	return "Processing.NDI.Lib.x64.dll"
+}
+
 // ndiDLLCandidates lists the places the installer may have left the
 // runtime, most specific first. The bare name lets the loader search PATH.
+// NDI Tools and the standalone NDI Runtime use different folder names, and
+// either can be the only thing installed, so both are listed.
 func ndiDLLCandidates() []string {
-	name := "Processing.NDI.Lib.x64.dll"
-	if runtime.GOARCH == "arm64" {
-		name = "Processing.NDI.Lib.arm64.dll"
-	}
+	name := ndiDLLName()
 	paths := []string{name}
 	for _, env := range []string{ndiRuntimeDirV6, ndiRuntimeDirV5} {
 		if dir := os.Getenv(env); dir != "" {
 			paths = append(paths, filepath.Join(dir, name))
 		}
 	}
+	programs := os.Getenv("ProgramFiles")
+	if programs == "" {
+		programs = `C:\Program Files`
+	}
 	for _, dir := range []string{
-		`C:\Program Files\NDI\NDI 6 Tools\Runtime`,
-		`C:\Program Files\NDI\NDI 5 Tools\Runtime`,
-		`C:\Program Files\NDI\NDI 5 Runtime`,
+		filepath.Join(programs, "NDI", "NDI 6 Runtime"),
+		filepath.Join(programs, "NDI", "NDI 6 Tools", "Runtime"),
+		filepath.Join(programs, "NDI", "NDI 5 Runtime"),
+		filepath.Join(programs, "NDI", "NDI 5 Tools", "Runtime"),
+		filepath.Join(programs, "NDI", "NDI 5"),
 	} {
 		paths = append(paths, filepath.Join(dir, name))
 	}
 	return paths
 }
 
-// loadNDI finds the runtime and resolves what the sender needs.
+// loadNDI finds the runtime and resolves what the sender needs. It tells a
+// missing install apart from one that is there but cannot load, because
+// the second sends an unhelpful "module not found" from Windows.
 func loadNDI() (*ndiLibrary, error) {
-	var last error
+	var broken error
 	for _, path := range ndiDLLCandidates() {
 		handle, err := syscall.LoadLibrary(path)
 		if err != nil {
-			last = err
+			if filepath.IsAbs(path) {
+				if _, statErr := os.Stat(path); statErr == nil {
+					broken = fmt.Errorf("the NDI runtime at %s could not be loaded: %w", path, err)
+				}
+			}
 			continue
 		}
 		lib := &ndiLibrary{handle: uintptr(handle)}
@@ -111,7 +130,7 @@ func loadNDI() (*ndiLibrary, error) {
 		} {
 			addr, err := syscall.GetProcAddress(handle, sym.name)
 			if err != nil {
-				last = fmt.Errorf("%s exports no %s: %w", path, sym.name, err)
+				broken = fmt.Errorf("%s exports no %s: %w", path, sym.name, err)
 				missing = true
 				break
 			}
@@ -123,10 +142,11 @@ func loadNDI() (*ndiLibrary, error) {
 		}
 		return lib, nil
 	}
-	if last == nil {
-		last = errors.New("not found")
+	if broken != nil {
+		return nil, broken
 	}
-	return nil, fmt.Errorf("the NDI runtime is not installed, install NDI Tools: %w", last)
+	return nil, fmt.Errorf("the NDI runtime is not installed, install NDI Tools: no %s on PATH, in %s, or under %s",
+		ndiDLLName(), ndiRuntimeDirV6, filepath.Join(os.Getenv("ProgramFiles"), "NDI"))
 }
 
 // call invokes one of the entry points; Windows passes arguments in
