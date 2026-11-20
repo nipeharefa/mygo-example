@@ -5,6 +5,9 @@ resource explorer mock, behind a local sign-in card. Package `main` builds
 one window with `github.com/egoist/mygo/ui`; there is no Kubernetes
 client, no network access, and no web page. The Go side is the whole app.
 
+On macOS the window can also publish itself as an NDI source, so OBS or
+the NDI tools can take it as a live video input.
+
 The sign-in is a demo gate, not security: the account is the
 `demoUsername`/`demoPassword` pair in `main.go`, `signedIn` lives on `app`,
 and nothing survives the process.
@@ -40,6 +43,12 @@ and identity rules live in
   before the rebuild), never from inside the build pass.
 - **Do not edit `src/mygo.ts` by hand.** It is `mygo generate` output, and
   the web frontend is currently unused (see "Known state").
+- **NDI output is macOS-only and stays pure Go.** `ndi_darwin.go` binds
+  the NDI runtime and CoreGraphics through `purego` (no cgo, no SDK
+  headers); `ndi_other.go` is the stub that keeps the Windows and Linux
+  builds compiling. Start and stop the sender from main-thread callbacks
+  (`OnClick`, `WhenReady`, `OnQuit`), never from the build pass, and never
+  read the window's AppKit objects from the capture goroutine.
 
 ## Commands
 
@@ -51,6 +60,7 @@ go vet ./...                     # the real vet gate for this module
 test -z "$(gofmt -l *.go)"       # CI formatting gate
 CGO_ENABLED=0 go test ./...      # view test, headless via ui.NewTester
 go run .                         # opens the window for a manual check
+MYGO_NDI=1 go run .              # ...and publishes it as an NDI source
 bun run build                    # packages the app into build/
 bun run build -- -platform darwin/arm64,darwin/amd64
 ```
@@ -66,8 +76,10 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 
 | Path | What |
 | --- | --- |
-| `main.go` | The app: `app` state, `resources`/`groups` dummy data, the view tree, `main()`. |
-| `main_test.go` | The headless view tests: sign-in gate, validation, Enter submit, sign-out, kind switching. |
+| `main.go` | The app: `app` state, `resources`/`groups` dummy data, the view tree, `main()`, the NDI toggle. |
+| `main_test.go` | The headless view tests: sign-in gate, validation, Enter submit, sign-out, kind switching, the NDI toggle without a window. |
+| `ndi_darwin.go` | The NDI sender: `CGWindowListCreateImage` capture of our own window through `purego`, then `gondi` frames. |
+| `ndi_other.go` | The `!darwin` stub that keeps Windows and Linux builds compiling; starting NDI there returns an error. |
 | `mygo.config.ts` | Packaging: name, identifier, output directory. `devUrl`, `devCommand`, `buildCommand` and `frontendDist` are inert for a native view. |
 | `src/`, `index.html`, `vite.config.ts` | Leftover web template; nothing renders it. |
 | `.github/workflows/ci.yml` | The test gate and the macOS/Windows/Linux packaging matrix. |

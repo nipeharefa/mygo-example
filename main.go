@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/egoist/mygo"
@@ -192,6 +193,11 @@ type app struct {
 	username string
 	password string
 	authErr  string
+
+	// The window and, while it publishes, the NDI sender behind it.
+	win    *mygo.Window
+	ndi    *ndiStream
+	ndiErr string
 }
 
 func newApp() *app {
@@ -366,8 +372,14 @@ func (a *app) groupItems(g group) []*resourceKind {
 
 func (a *app) pane(c *ui.Context) {
 	k := resource(a.kind)
+	t := c.Theme()
 	ui.Column(c).Grow(1).Children(func() {
 		a.header(c, k)
+		if a.ndiErr != "" {
+			ui.Row(c).Padding(0, 20, 8).Children(func() {
+				ui.Text(c, "NDI: "+a.ndiErr).FontSize(11).TextColor(t.Danger).SingleLine()
+			})
+		}
 		ui.Divider(c)
 		// A Row centers its children vertically by default, which left the
 		// table and inspector floating in the middle of the pane; stretch
@@ -393,8 +405,50 @@ func (a *app) header(c *ui.Context, k *resourceKind) {
 		ui.Select(c, &a.namespace, namespaces).Width(160)
 		ui.Button(c, "Refresh")
 		ui.PrimaryButton(c, "Create")
+		ui.Button(c, a.ndiLabel()).OnClick(a.toggleNDI)
 		ui.Button(c, "Sign out").OnClick(a.signOut)
 	})
+}
+
+// startNDI publishes the window as an NDI source and keeps the error, if
+// any, for the line under the header.
+func (a *app) startNDI() error {
+	if a.ndi != nil {
+		return nil
+	}
+	s, err := startNDISender(a.win)
+	if err != nil {
+		a.ndiErr = err.Error()
+		return err
+	}
+	a.ndi, a.ndiErr = s, ""
+	return nil
+}
+
+// stopNDI removes the source; it is safe when nothing is streaming.
+func (a *app) stopNDI() {
+	if a.ndi == nil {
+		return
+	}
+	a.ndi.Stop()
+	a.ndi = nil
+}
+
+// toggleNDI is the header button's action.
+func (a *app) toggleNDI() {
+	if a.ndi != nil {
+		a.stopNDI()
+		return
+	}
+	_ = a.startNDI()
+}
+
+// ndiLabel names the button after what clicking it does.
+func (a *app) ndiLabel() string {
+	if a.ndi != nil {
+		return "Stop NDI"
+	}
+	return "Start NDI"
 }
 
 // columns returns the table's columns: Pods show their restart count.
@@ -582,7 +636,7 @@ func clamp(v, lo, hi int) int {
 func main() {
 	a := newApp()
 	mygo.App.WhenReady(func() {
-		mygo.NewWindow(mygo.WindowOptions{
+		a.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:     "Kubernetes",
 			Width:     1180,
 			Height:    720,
@@ -591,7 +645,13 @@ func main() {
 			StateKey:  "main",
 			Content:   ui.View(a.view),
 		})
+		// MYGO_NDI=1 publishes the window as soon as it opens, which is
+		// what a stream setup wants; the header button does it on demand.
+		if os.Getenv("MYGO_NDI") != "" {
+			_ = a.startNDI()
+		}
 	})
+	mygo.App.OnQuit(a.stopNDI)
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}

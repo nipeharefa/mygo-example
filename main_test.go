@@ -147,6 +147,43 @@ func TestSignOut(t *testing.T) {
 	}
 }
 
+// Starting NDI without a window, as in a headless test, reports the
+// problem instead of streaming, and the button stays on Start.
+func TestNDIToggleWithoutWindow(t *testing.T) {
+	a := newApp()
+	tt := ui.NewTester(a.view, 1180, 720)
+	signIn(t, a, tt)
+
+	if !tt.HasText("Start NDI") {
+		t.Fatalf("the header does not offer NDI: %q", tt.Texts())
+	}
+	if err := tt.Click("Start NDI"); err != nil {
+		t.Fatal(err)
+	}
+	if a.ndi != nil {
+		t.Fatal("a sender started without a window")
+	}
+	if a.ndiErr == "" {
+		t.Fatal("a failed start left no error")
+	}
+	if !tt.HasText("NDI: " + a.ndiErr) {
+		t.Fatalf("the header strip did not show the error: %q", tt.Texts())
+	}
+	if !tt.HasText("Start NDI") {
+		t.Fatalf("the button left its start state: %q", tt.Texts())
+	}
+}
+
+// Stopping with nothing streaming is a no-op, so quitting and signing out
+// can call it unconditionally.
+func TestStopNDIWithoutSender(t *testing.T) {
+	a := newApp()
+	a.stopNDI()
+	if a.ndi != nil || a.ndiErr != "" {
+		t.Fatalf("stop changed state: %v %q", a.ndi, a.ndiErr)
+	}
+}
+
 // The view runs without a window in tests, which click as a user would.
 func TestResourceSwitching(t *testing.T) {
 	a := newApp()

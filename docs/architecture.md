@@ -9,6 +9,8 @@ The app is a mock Kubernetes resource explorer drawn with package `ui`:
 a sidebar of resource kinds, a table of dummy objects for the chosen
 kind, and an inspector for the chosen row. There is no Kubernetes client,
 no network access, and no web page. One `app` struct is the whole state.
+On macOS it can also publish its own window as an NDI video source; that
+is the only non-UI feature (see "NDI output").
 
 ## What runs
 
@@ -16,7 +18,7 @@ no network access, and no web page. One `app` struct is the whole state.
 
 ```go
 mygo.App.WhenReady(func() {
-    mygo.NewWindow(mygo.WindowOptions{
+    a.win = mygo.NewWindow(mygo.WindowOptions{
         Title:     "Kubernetes",
         Width:     1180,
         Height:    720,
@@ -25,11 +27,19 @@ mygo.App.WhenReady(func() {
         StateKey:  "main",
         Content:   ui.View(a.view),
     })
+    if os.Getenv("MYGO_NDI") != "" {
+        _ = a.startNDI()
+    }
 })
+mygo.App.OnQuit(a.stopNDI)
 if err := mygo.App.Run(); err != nil {
     log.Fatal(err)
 }
 ```
+
+The window is kept on `app` because the NDI sender captures it
+(`a.win.NativeHandle()`); `OnQuit` stops the sender so the source leaves
+the network when the window closes. See "NDI output".
 
 `Content: ui.View(a.view)` makes the window a native UI window: MyGo
 calls `a.view(c)` to build a frame and draws it itself, on the GPU where
@@ -63,6 +73,9 @@ All state lives on one `app` (`main.go`), constructed by `newApp()`:
 | `username string` | The login card's username field, bound to `ui.TextInput`. Kept across sign-out. |
 | `password string` | The login card's password field, bound to `ui.TextInput` and masked with `.Password()`. Cleared on sign-in and sign-out. |
 | `authErr string` | The login card's inline error, shown only while non-empty and cleared when either field changes. |
+| `win *mygo.Window` | The one window, kept so the NDI sender can read its native handle. |
+| `ndi *ndiStream` | The running NDI sender, or nil. Non-nil drives the header's "Stop NDI" label. |
+| `ndiErr string` | Why starting NDI failed, or empty. Rendered as an error strip under the header. |
 
 There is no `ui.Element`, no widget parts and no `*ui.Context` on `app`:
 those expire before the next build pass, so only this plain data may
@@ -155,6 +168,54 @@ Guard rails for edits here: keep the visible heading from being exactly
 "Sign in" (the clickable button owns that string), and never store the
 password anywhere but the one bound field.
 
+## NDI output
+
+On macOS the window can publish itself as an NDI source, so OBS (with
+obs-ndi) or any other NDI receiver can take the live app as a video
+input. The header's "Start NDI" / "Stop NDI" button toggles it, and
+`MYGO_NDI=1` starts it on launch. `ndi_other.go` is the `!darwin` stub:
+the Windows and Linux builds compile, and starting there returns
+"NDI output is only available on macOS".
+
+Three pieces, all in `ndi_darwin.go`:
+
+1. **Capture our own window.** `newWindowCapturer` reads the window number
+   with `objc_msgSend(handle, sel_registerName("windowNumber"))` — AppKit
+   is main-thread-only, so it runs in `WhenReady`/`OnClick`, never in the
+   capture goroutine. Per frame, `CGWindowListCreateImage` with
+   `includingWindow | boundsIgnoreFraming | nominalResolution` returns the
+   window as the display shows it, title bar included, at 1 point per
+   pixel. This is the one capture route macOS grants an app without the
+   screen-recording permission, because the window is its own.
+2. **Draw it into BGRA.** `CGBitmapContextCreate` over a `w*4` buffer with
+   `kCGImageAlphaPremultipliedFirst | kCGImageByteOrder32Little`, then
+   `CGContextDrawImage`. That combination is NDI's BGRA; getting the alpha
+   or byte-order flag wrong yields inverted or garbage colors, not an
+   error. `CGContextSetInterpolationQuality` is set to none so a resize
+   scales rather than blurs.
+3. **Send it.** A goroutine builds one `gondi.VideoFrameV2` (FourCC
+   `BGRA`, 30/1, progressive, `SendTimecodeSynthesize`) and calls
+   `SendVideoFrame`, which blocks on the sender's frame clock. That
+   blocking call **is** the frame pacer: no ticker, no sleep on success.
+
+`gondi` is a purego wrapper, so this needs no cgo and no NDI SDK headers:
+`InitLibrary` dlopens `/usr/local/lib/libndi.dylib` (the NDI Tools
+runtime) and the capture uses `purego` bindings to CoreGraphics and
+libobjc. Both libraries and every symbol are resolved lazily, and their
+panics are caught and turned into `ndiErr`, so a Mac without NDI Tools
+gets the error strip instead of a crash.
+
+`startNDI` records failure in `ndiErr` and leaves `ndi` nil; success
+clears the error. `stopNDI` is nil-safe, waits for the goroutine to
+finish, then destroys the sender, which is what removes the source from
+the network — `OnQuit` does it on exit, so closing the app (or Ctrl-C, a
+SIGTERM) never leaves a ghost source behind. `toggleNDI` and `ndiLabel`
+are only the button's read of `a.ndi`.
+
+The error strip is a row between the header and the divider, styled
+`theme.Danger` at 11 DIP: it takes layout space only while `ndiErr` is
+non-empty, so a normal launch has no gap.
+
 ## Layout
 
 ```
@@ -166,6 +227,7 @@ shell: Row .Fill().AlignItems(ui.Stretch).Background(theme.Background)
 ├── Divider
 └── pane: Column .Grow(1)
     ├── header: Row .Padding(16, 20)
+    ├── NDI error strip: Row .Padding(0, 20, 8)   (only while a.ndiErr is set)
     ├── Divider
     └── Row .Grow(1).AlignItems(ui.Stretch)
         ├── table: Table .Grow(1)
@@ -230,8 +292,9 @@ Two invariants matter:
 `t.AccentText`, the label at 20 bold, a subtitle
 `"<N> objects · <namespace>"` at 11 in `t.TextMuted`, a 160 DIP
 `ui.Select` for the mock namespaces, a `Refresh` button and a
-`Create` primary button. The last two are decoration; nothing handles
-them.
+`Create` primary button. The first two are decoration; nothing handles
+them. Then the NDI toggle ("Start NDI" / "Stop NDI", see "NDI output")
+and the `Sign out` button, which are wired.
 
 **Table.** `columns(k)` gives Name (auto), Namespace (110), Status (150),
 and, for `pods` only, Restarts (76, `ui.End`), then always Age (64,
@@ -294,6 +357,15 @@ and `Type`/`Key` drive the focused input.
   Deployments (which proves the pane, not just the highlight, follows the
   sidebar), and a switch to Secrets after setting `a.row = 3`, which
   proves the row reset.
+- `TestNDIToggleWithoutWindow` — clicking "Start NDI" with no window
+  fails into `a.ndiErr` instead of panicking, the strip renders, and the
+  button stays "Start NDI".
+- `TestStopNDIWithoutSender` — `stopNDI` with nothing running is a no-op.
+
+The two NDI tests are platform-independent by design: the error path is
+the one thing a headless tester can prove, and it is the path a Mac
+without NDI Tools takes. A real stream is verified by hand (see
+"Verification").
 
 The helper `signIn` sets the two fields and clicks "Sign in", so tests
 that only need the dashboard do not retype the account.
@@ -325,16 +397,28 @@ from the chosen `*resourceKind`.
 
 ```sh
 CGO_ENABLED=0 go build ./...
+CGO_ENABLED=0 GOOS=linux go build ./...   # CGO_ENABLED=0 is required here
 go vet ./...
 test -z "$(gofmt -l *.go)"
 CGO_ENABLED=0 go test ./...
-go run .            # manual check: sidebar, table, inspector
+go run .                     # manual check: sidebar, table, inspector
+MYGO_NDI=1 go run .          # ...and an NDI source in OBS / NDI Monitor
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same gate plus darwin/windows
 cross-compiles, then packages the app for macOS, Windows and Linux as
 artifacts. In a sandboxed agent session, set `GOCACHE` to a writable
 directory; the default `~/Library/Caches/go-build` is denied.
+
+A cross-compile to Linux without `CGO_ENABLED=0` fails inside the
+standard library ("implicit declaration of function 'setresgid'"), which
+is why the flag belongs on every build, not only on the host one.
+
+To check NDI by hand: `MYGO_NDI=1 go run .`, then add an "NDI Source" in
+OBS (or open NDI Video Monitor) and pick `mygo-demo (Kubernetes)`; the
+listing is prefixed with the machine name, e.g.
+`FLOCK-MBP1-PRO (mygo-demo (Kubernetes))`. Frames are the window as it
+looks on screen, title bar included. Quitting the app removes the source.
 
 `go tool mygo vet .`, recommended by the maintenance skill, is not
 available in this module (it ships no `mygo` tool), so `go vet ./...` is
@@ -360,16 +444,26 @@ Recorded as observed state, not as a work list:
    the code has 13, lists 120/120/80/70 column widths against the shipped
    110/150/76/64, promises a `shownNamespace` helper that landed as
    literal `"—"` values, and calls the directory "not a git repository".
-5. **Thin test coverage.** Kind switching, row reset and the sign-in
-   flow are tested; filtering, the inspector, empty-kind handling, the
-   namespace picker and the header's Refresh/Create buttons have no
-   tests, and there are no golden rendering checks.
+5. **Thin test coverage.** Kind switching, row reset, the sign-in flow
+   and the NDI error path are tested; filtering, the inspector,
+   empty-kind handling, the namespace picker, the header's Refresh/Create
+   buttons and a real NDI stream have no automated tests, and there are
+   no golden rendering checks.
 6. **The sign-in is a demo gate.** The credentials are two source
    constants, there is no session persistence, rate limiting or password
    hashing, and the password sits in a plain `string`. It hides the
    dashboard from a casual look; it is not security.
-7. **Version coupling.** Everything here describes MyGo **v0.10.0**.
+7. **NDI is a demo feed, macOS only, and fixed to one window.** The
+   sender captures the whole window at 1 point per pixel with the title
+   bar, so a maximized 4K window sends a large frame; it never scales to
+   a broadcast resolution and offers no audio, alpha or per-window
+   choice. The window number is read once at start, so a recreated window
+   needs a stop/start, and the source name comes from the NDI runtime's
+   machine prefix. `gondi` is pinned at v0.0.2 (2023), which is the only
+   NDI binding here that avoids cgo; it is unsupported on Windows.
+8. **Version coupling.** Everything here describes MyGo **v0.10.0**.
    After an upgrade, re-read `ui/doc.go` in the new module and the
    skill's migration note before trusting the API shapes in this file.
    The unused web tooling (`mygo-cli`, `mygo-runtime`) still pins 0.7.x;
+   bump it with the Go module when packaging matters.
    bump it with the Go module when packaging matters.
