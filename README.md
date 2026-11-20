@@ -71,6 +71,13 @@ are unnecessary — plain **Window Capture** is enough, and NDI is only
 worth the install when the picture has to leave the machine or reach
 another app.
 
+NDI Tools also installs NDI Scan Converter, which publishes a screen or a
+region as an NDI source by itself. Keep the app window on that screen and
+open Scan Converter — that gets the picture onto the network without the
+OBS plugin. The catch is that OBS still cannot *receive* NDI without
+DistroAV, so this only helps when the consumer is another machine or an
+NDI app such as NDI Video Monitor.
+
 ### Linux
 
 Neither the app nor OBS publishes NDI out of the box here, and the app
