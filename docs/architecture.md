@@ -9,8 +9,8 @@ The app is a mock Kubernetes resource explorer drawn with package `ui`:
 a sidebar of resource kinds, a table of dummy objects for the chosen
 kind, and an inspector for the chosen row. There is no Kubernetes client,
 no network access, and no web page. One `app` struct is the whole state.
-On macOS it can also publish its own window as an NDI video source; that
-is the only non-UI feature (see "NDI output").
+It can also publish its own window as an NDI video source on macOS,
+Windows and Linux; that is the only non-UI feature (see "NDI output").
 
 ## What runs
 
@@ -170,16 +170,26 @@ password anywhere but the one bound field.
 
 ## NDI output
 
-On macOS the window can publish itself as an NDI source, so OBS (with
-obs-ndi) or any other NDI receiver can take the live app as a video
-input. The header's "Start NDI" / "Stop NDI" button toggles it, and
-`MYGO_NDI=1` starts it on launch. `ndi_other.go` is the `!darwin` stub:
-the Windows and Linux builds compile, `ndiSupported()` returns false
-there, the header leaves the toggle out, and a start request is quietly
-ignored rather than failing. That matters for testers: a Windows beta has
-no NDI runtime, so the button must not be a dead end.
+The window can publish itself as an NDI source on macOS, Windows and
+Linux, so OBS (with an NDI plugin) or any other NDI receiver can take the
+live app as a video input. The header's "Start NDI" / "Stop NDI" button
+toggles it, and `MYGO_NDI=1` starts it on launch. Every platform needs
+the NDI Runtime installed; without it the start fails into the error
+strip instead of crashing. `ndi_other.go` is the stub for the systems
+without a sender: it compiles the app, `ndiSupported()` returns false,
+the header leaves the toggle out, and a start request is quietly ignored.
 
-Three pieces, all in `ndi_darwin.go`:
+The shape is the same everywhere — capture a frame into BGRA, hand it to
+the NDI sender, and let the sender's video clock pace the loop — but each
+platform answers "how do I read my own window" differently:
+
+| File | Runtime binding | Capture | Notes |
+| --- | --- | --- | --- |
+| `ndi_darwin.go` | `gondi` (purego dlopen) | `CGWindowListCreateImage` via `purego` | Whole window at 1 pt/px, title bar included |
+| `ndi_windows.go` | `syscall.LoadLibrary` + `SyscallN` | GDI `PrintWindow` into a 32-bit DIB | Client area only; `BitBlt` fallback |
+| `ndi_linux.go` | `gondi` | `gdk_pixbuf_get_from_window` | Client area, X11; Wayland refuses |
+
+Three pieces, as in `ndi_darwin.go`:
 
 1. **Capture our own window.** `newWindowCapturer` reads the window number
    with `objc_msgSend(handle, sel_registerName("windowNumber"))` — AppKit
@@ -206,6 +216,28 @@ runtime) and the capture uses `purego` bindings to CoreGraphics and
 libobjc. Both libraries and every symbol are resolved lazily, and their
 panics are caught and turned into `ndiErr`, so a Mac without NDI Tools
 gets the error strip instead of a crash.
+
+The Windows build binds the NDI runtime by hand because `purego` has no
+`Dlopen` on Windows: `loadNDI` tries the bare DLL name (`PATH`), then
+`NDI_RUNTIME_DIR_V6`/`V5`, then the default install directories, and
+resolves `NDIlib_initialize`, `NDIlib_send_create_v2`,
+`NDIlib_send_send_video_v2` and `NDIlib_send_destroy`, calling them
+through `syscall.SyscallN`. `ndiVideoFrame` and `ndiSendCreate` mirror
+the C structs field for field; `ndi_windows_test.go` pins every offset
+and size, because a wrong layout does not fail loudly — it makes the
+NDI runtime read garbage. Capture uses `PrintWindow(hwnd, dc,
+PW_RENDERFULLCONTENT)` into a top-down `CreateDIBSection` bitmap, the
+same call the MyGo test hooks use, and sets the fourth byte of each pixel
+to 0xff since GDI leaves alpha at zero and NDI would read that as
+transparent.
+
+On Linux the `GtkWindow*` from `NativeHandle` is converted with
+`gtk_widget_get_window`, and `gdk_pixbuf_get_from_window` reads the
+client area. GDK is not thread safe, so the capture goroutine wraps each
+frame in `mygo.RunOnMain` — a per-frame round trip that blocks until the
+main loop has copied the pixels out. Wayland gives no readback for a
+window's own surface, so `gdk_pixbuf_get_from_window` returns null and the
+start fails with that message; X11 works.
 
 `startNDI` records failure in `ndiErr` and leaves `ndi` nil; success
 clears the error. `stopNDI` is nil-safe, waits for the goroutine to
@@ -362,14 +394,19 @@ and `Type`/`Key` drive the focused input.
 - `TestNDIToggleWithoutWindow` — clicking "Start NDI" with no window
   fails into `a.ndiErr` instead of panicking, the strip renders, and the
   button stays "Start NDI". Skips on a build without a sender.
-- `TestNDIHiddenWithoutSender` — the off-macOS counterpart: the header
-  offers no toggle and `startNDI` is a quiet no-op. Skips on macOS.
+- `TestNDIHiddenWithoutSender` — the counterpart for a build with no
+  sender: the header offers no toggle and `startNDI` is a quiet no-op.
+  Skips on the three platforms that do publish.
+- `TestNDIFrameLayout` (Windows only) — pins every field offset and the
+  size of `ndiVideoFrame` and `ndiSendCreate` to what the NDI C ABI
+  declares.
 - `TestStopNDIWithoutSender` — `stopNDI` with nothing running is a no-op.
 
-The NDI pair is written so each build runs exactly one of them: the error
-path is the one thing a headless tester can prove, and it is the path a
-Mac without NDI Tools takes. A real stream is verified by hand (see
-"Verification").
+The toggle pair is written so each build runs exactly one of them: the
+error path is the one thing a headless tester can prove, and it is the
+path a machine without NDI Tools takes. The real stream is verified by
+hand; on Windows that includes the layout test, because the C struct
+offsets are the part a compiler cannot check. See "Verification".
 
 The helper `signIn` sets the two fields and clicks "Sign in", so tests
 that only need the dashboard do not retype the account.
@@ -401,8 +438,10 @@ from the chosen `*resourceKind`.
 
 ```sh
 CGO_ENABLED=0 go build ./...
-CGO_ENABLED=0 GOOS=linux go build ./...   # CGO_ENABLED=0 is required here
+CGO_ENABLED=0 GOOS=windows go build ./...   # every NDI file must compile
+CGO_ENABLED=0 GOOS=linux go build ./...     # CGO_ENABLED=0 is required here
 go vet ./...
+GOOS=windows CGO_ENABLED=0 go vet ./...     # type-checks ndi_windows.go
 test -z "$(gofmt -l *.go)"
 CGO_ENABLED=0 go test ./...
 go run .                     # manual check: sidebar, table, inspector
@@ -431,8 +470,12 @@ is why the flag belongs on every build, not only on the host one.
 To check NDI by hand: `MYGO_NDI=1 go run .`, then add an "NDI Source" in
 OBS (or open NDI Video Monitor) and pick `mygo-demo (Kubernetes)`; the
 listing is prefixed with the machine name, e.g.
-`FLOCK-MBP1-PRO (mygo-demo (Kubernetes))`. Frames are the window as it
-looks on screen, title bar included. Quitting the app removes the source.
+`FLOCK-MBP1-PRO (mygo-demo (Kubernetes))`. On macOS the frames are the
+whole window as it looks on screen, title bar included; on Windows and
+Linux they are the client area. Quitting the app removes the source.
+Windows needs the NDI Runtime's x64 DLL on `PATH` or under
+`NDI_RUNTIME_DIR_V6`; the CI runner has neither, so the Windows job proves
+the binding compiles and the structs line up, not that a stream appears.
 
 `go tool mygo vet .`, recommended by the maintenance skill, is not
 available in this module (it ships no `mygo` tool), so `go vet ./...` is
@@ -467,15 +510,20 @@ Recorded as observed state, not as a work list:
    constants, there is no session persistence, rate limiting or password
    hashing, and the password sits in a plain `string`. It hides the
    dashboard from a casual look; it is not security.
-7. **NDI is a demo feed, macOS only, and fixed to one window.** The
-   sender captures the whole window at 1 point per pixel with the title
-   bar, so a maximized 4K window sends a large frame; it never scales to
-   a broadcast resolution and offers no audio, alpha or per-window
-   choice. The window number is read once at start, so a recreated window
-   needs a stop/start, and the source name comes from the NDI runtime's
-   machine prefix. `gondi` is pinned at v0.0.2 (2023), which is the only
-   NDI binding here that avoids cgo; it is unsupported on Windows, so the
-   Windows and Linux builds hide the toggle and send nothing.
+7. **NDI is a demo feed, fixed to one window, and unproven on Windows
+   and Linux.** The sender captures one window at 1 pixel per point, so a
+   maximized 4K window sends a large frame; it never scales to a broadcast
+   resolution and offers no audio, alpha or per-window choice. macOS sends
+   the window with its title bar, Windows and Linux the client area. The
+   window handle is read once at start, so a recreated window needs a
+   stop/start, and the source name carries the NDI runtime's machine
+   prefix. `gondi` is pinned at v0.0.2 (2023), the only NDI binding here
+   that avoids cgo, and only the Windows path bypasses it, with a
+   hand-written `syscall` binding. The Windows and Linux paths are
+   compiled, vetted and (on Windows) offset-tested in CI, but the only
+   platform where the stream has actually been watched in OBS is macOS;
+   check the other two on real hardware before trusting them in a demo.
+   Wayland cannot read a window's own pixels, so Linux NDI is X11 only.
 8. **Version coupling.** Everything here describes MyGo **v0.10.0**.
    After an upgrade, re-read `ui/doc.go` in the new module and the
    skill's migration note before trusting the API shapes in this file.

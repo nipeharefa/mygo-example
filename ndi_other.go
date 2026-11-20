@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !linux && !windows
 
 package main
 
@@ -22,5 +22,5 @@ func (s *ndiStream) Stop() {}
 // startNDISender is the safety net behind startNDI, which already returns
 // early on a build without a sender.
 func startNDISender(*mygo.Window) (*ndiStream, error) {
-	return nil, errors.New("NDI output is only available on macOS")
+	return nil, errors.New("NDI output is not supported on this platform")
 }

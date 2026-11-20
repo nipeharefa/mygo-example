@@ -2,8 +2,8 @@
 
 A native desktop mock of a Kubernetes resource explorer, built with
 [MyGo](https://github.com/egoist/mygo). One window, dummy data, no
-cluster and no network access. On macOS the window can also publish
-itself as an NDI video source for OBS.
+cluster and no network access. On macOS, Windows and Linux the window can
+also publish itself as an NDI video source for OBS.
 
 Sign in with **admin** / **admin**.
 
@@ -24,8 +24,9 @@ The builds are not signed. On macOS, right-click the app and choose
 
 ## Getting the window into OBS
 
-The app publishes NDI on macOS only. On Windows and Linux, OBS captures
-the window instead — same result on screen, one more step to set up.
+The app publishes itself as an NDI source on macOS, Windows and Linux.
+Each platform needs the NDI Runtime installed, and the app reports the
+missing runtime in a strip under the header instead of failing silently.
 
 ### macOS: the app is the NDI source
 
@@ -44,46 +45,46 @@ the window instead — same result on screen, one more step to set up.
 **Stop NDI** in the header unregisters the source, and quitting the app
 does the same.
 
-### Windows: OBS captures the window
+### Windows: the app is the NDI source
 
-The Windows build has no **Start NDI** button — it cannot publish NDI
-itself. To get the picture into OBS, and from there onto the network:
+1. Install the **NDI Runtime** from
+   [NDI Tools](https://ndi.video/tools/). It has to be the x64 runtime;
+   the installer puts `Processing.NDI.Lib.x64.dll` under
+   `C:\Program Files\NDI\NDI <version> Tools\Runtime` and sets
+   `NDI_RUNTIME_DIR_V6`. Without it the header reports that the runtime is
+   missing.
+2. Launch the app, sign in, then press **Start NDI** in the header. (Or
+   start it with `MYGO_NDI=1` in the environment.)
+3. In OBS add an **NDI Source**, or open NDI Video Monitor, and pick
+   `mygo-demo (Kubernetes)`. Other machines see it as
+   `<machine name> (mygo-demo (Kubernetes))`.
+4. The feed is the window's client area at one pixel per point, no title
+   bar: crop or scale it with an OBS transform.
 
-1. Install [OBS Studio](https://obsproject.com) **31.1.1 or newer**: the
-   current NDI plugin refuses older releases.
-2. Install the **NDI Runtime 6.3 or newer** from
-   [NDI Tools](https://ndi.video/tools/). It is a separate download, and
-   the plugin cannot load without it.
-3. Install the NDI plugin for OBS,
-   [DistroAV](https://github.com/DistroAV/DistroAV/releases) (formerly
-   obs-ndi), either with `winget install DistroAV.DistroAV` or by running
-   the `distroav-<version>-windows-x64-Installer.exe` release asset. It
-   publishes Windows x64 only, and needs a restart of OBS.
-4. In OBS, under **Sources**, press **+** → **Window Capture** → window
-   `Kubernetes`. Leave the capture method on **Windows 10 (1903 and up)**.
-5. To publish that source to other machines, right-click it → **Filters**
-   → **+** → **NDI Output** (DistroAV also calls it *NDI Dedicated
-   Output*) and give it a name. For the whole program feed instead, use
-   **Tools** → **NDI Output Settings**.
+To *receive* NDI in OBS you still need the plugin:
+[DistroAV](https://github.com/DistroAV/DistroAV/releases) (formerly
+obs-ndi), via `winget install DistroAV.DistroAV` or the
+`distroav-<version>-windows-x64-Installer.exe` asset, with OBS Studio
+**31.1.1 or newer**. That is for OBS only — the app needs nothing but the
+runtime.
 
-If you only need the window inside OBS on the same machine, steps 2 to 5
-are unnecessary — plain **Window Capture** is enough, and NDI is only
-worth the install when the picture has to leave the machine or reach
+If you only need the window inside OBS on the same machine, OBS **Window
+Capture** (window `Kubernetes`) is still simpler than the whole NDI
+route; NDI is worth it when the picture has to leave the machine or reach
 another app.
 
-NDI Tools also installs NDI Scan Converter, which publishes a screen or a
-region as an NDI source by itself. Keep the app window on that screen and
-open Scan Converter — that gets the picture onto the network without the
-OBS plugin. The catch is that OBS still cannot *receive* NDI without
-DistroAV, so this only helps when the consumer is another machine or an
-NDI app such as NDI Video Monitor.
+### Linux: the app is the NDI source
 
-### Linux
+1. Install the NDI Runtime, which ships with
+   [NDI Tools](https://ndi.video/tools/) and lands in `/usr/local/lib/libndi.so`.
+2. Launch the app, sign in, then press **Start NDI** in the header.
+3. The feed is the window's client area, captured through GDK, so it
+   works on **X11**. On Wayland the app cannot read its own pixels and
+   the header reports that instead.
+4. To receive it in OBS, install DistroAV from Flatpak or its `.deb`
+   release asset; NDI Video Monitor from NDI Tools also works.
 
-Neither the app nor OBS publishes NDI out of the box here, and the app
-has no NDI support on Linux at all. Use OBS **Window Capture** (X11; on
-Wayland, capture through the desktop portal), and install DistroAV from
-Flatpak or its `.deb` release asset if the feed has to leave the machine.
+Plain OBS **Window Capture** remains the fallback on either session type.
 
 ## Build from source
 
@@ -91,7 +92,7 @@ Flatpak or its `.deb` release asset if the feed has to leave the machine.
 CGO_ENABLED=0 go build ./...   # the app, no cgo anywhere
 CGO_ENABLED=0 go test ./...    # headless view tests
 go run .                       # opens the window
-MYGO_NDI=1 go run .            # ...and publishes it as NDI (macOS)
+MYGO_NDI=1 go run .            # ...and publishes it as NDI
 bun run build                  # packaged installers in build/
 ```
 
