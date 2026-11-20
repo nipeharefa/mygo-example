@@ -12,6 +12,13 @@ import (
 // sidebarWidth is the fixed width of the resource sidebar.
 const sidebarWidth = 244
 
+// The demo account. The app has no backend, no password store and no
+// session: signing in only gates the dashboard.
+const (
+	demoUsername = "admin"
+	demoPassword = "admin"
+)
+
 // object is one dummy Kubernetes object of a kind.
 type object struct {
 	Name      string
@@ -177,6 +184,14 @@ type app struct {
 	configOpen    bool
 	networkOpen   bool
 	clusterOpen   bool
+
+	// The sign-in gate. signedIn is false until the demo account is
+	// accepted, so a fresh window starts on the login card, not the
+	// dashboard; nothing here survives the process.
+	signedIn bool
+	username string
+	password string
+	authErr  string
 }
 
 func newApp() *app {
@@ -206,6 +221,10 @@ func (a *app) groupOpen(group string) *bool {
 
 // view builds the window's interface from the state, for every frame.
 func (a *app) view(c *ui.Context) {
+	if !a.signedIn {
+		a.login(c)
+		return
+	}
 	// A new kind starts at its first object with a fresh table state, so a
 	// stale row or scroll offset never points past the new object slice.
 	if a.kind != a.lastKind {
@@ -216,9 +235,73 @@ func (a *app) view(c *ui.Context) {
 	a.shell(c)
 }
 
+// login draws the sign-in card. The account is the one in demoUsername and
+// demoPassword; there is no server to ask, and Enter in either field submits
+// as the button does.
+func (a *app) login(c *ui.Context) {
+	t := c.Theme()
+	ui.Column(c).Fill().Background(t.Background).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+		ui.Column(c).Width(360).Padding(28, 26).Gap(10).Radius(12).Background(t.Surface).Border(1, t.Border).Children(func() {
+			ui.Text(c, "KUBERNETES").FontSize(10).FontWeight(600).TextColor(t.TextMuted).SingleLine()
+			ui.Text(c, "Welcome back").FontSize(24).Bold().SingleLine()
+			ui.Text(c, "Sign in with the demo account to open the dashboard.").FontSize(11).TextColor(t.TextMuted).SingleLine()
+
+			ui.Column(c).Gap(4).Children(func() {
+				ui.Text(c, "Username").FontSize(11).TextColor(t.TextMuted).SingleLine()
+				ui.TextInput(c, &a.username).Label("Username input").Placeholder(demoUsername).
+					OnChange(a.clearAuthError).OnSubmit(a.signIn)
+			})
+			ui.Column(c).Gap(4).Children(func() {
+				ui.Text(c, "Password").FontSize(11).TextColor(t.TextMuted).SingleLine()
+				ui.TextInput(c, &a.password).Label("Password input").Password().Placeholder("Password").
+					OnChange(a.clearAuthError).OnSubmit(a.signIn)
+			})
+
+			if a.authErr != "" {
+				ui.Text(c, a.authErr).FontSize(11).TextColor(t.Danger).SingleLine()
+			}
+			ui.PrimaryButton(c, "Sign in").OnClick(a.signIn)
+			ui.Text(c, "Demo account: "+demoUsername+" / "+demoPassword).FontSize(10).TextColor(t.TextMuted).SingleLine()
+		})
+	})
+}
+
+// signIn accepts the demo account and switches the next frame to the
+// dashboard. Wrong credentials keep the card and show one generic error.
+func (a *app) signIn() {
+	if strings.TrimSpace(a.username) != demoUsername || a.password != demoPassword {
+		a.authErr = "Wrong username or password."
+		return
+	}
+	a.authErr = ""
+	a.signedIn = true
+	a.password = ""
+	// The dashboard starts at its first row whatever the table held before
+	// signing out; the chosen kind stays.
+	a.table = ui.ListState{}
+	a.row = 0
+}
+
+// signOut returns to the login card. The username stays for the next
+// attempt; the password never does.
+func (a *app) signOut() {
+	a.signedIn = false
+	a.password = ""
+	a.authErr = ""
+	a.filter = ""
+}
+
+// clearAuthError hides a stale error as soon as either field changes.
+func (a *app) clearAuthError() {
+	a.authErr = ""
+}
+
 func (a *app) shell(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c).Fill().Background(t.Background).Children(func() {
+	// Stretch, because a Row centers its children vertically by default:
+	// the pane is content-height, so centering it floats the whole pane
+	// (header included) down the window and leaves a band above it.
+	ui.Row(c).Fill().Background(t.Background).AlignItems(ui.Stretch).Children(func() {
 		a.sidebar(c)
 		ui.Divider(c)
 		a.pane(c)
@@ -286,7 +369,10 @@ func (a *app) pane(c *ui.Context) {
 	ui.Column(c).Grow(1).Children(func() {
 		a.header(c, k)
 		ui.Divider(c)
-		ui.Row(c).Grow(1).Children(func() {
+		// A Row centers its children vertically by default, which left the
+		// table and inspector floating in the middle of the pane; stretch
+		// them so the table starts under its header and the rows fill down.
+		ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
 			a.objectTable(c, k)
 			ui.Divider(c)
 			a.inspector(c, k)
@@ -307,6 +393,7 @@ func (a *app) header(c *ui.Context, k *resourceKind) {
 		ui.Select(c, &a.namespace, namespaces).Width(160)
 		ui.Button(c, "Refresh")
 		ui.PrimaryButton(c, "Create")
+		ui.Button(c, "Sign out").OnClick(a.signOut)
 	})
 }
 

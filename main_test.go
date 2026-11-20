@@ -6,10 +6,152 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// signIn opens the dashboard through the login card, failing the test when
+// the demo account is rejected.
+func signIn(t *testing.T, a *app, tt *ui.Tester) {
+	t.Helper()
+	a.username, a.password = demoUsername, demoPassword
+	if err := tt.Click("Sign in"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.signedIn {
+		t.Fatalf("not signed in after the demo account: %q", tt.Texts())
+	}
+}
+
+// A fresh window is the login card, not the dashboard.
+func TestLoginGate(t *testing.T) {
+	a := newApp()
+	tt := ui.NewTester(a.view, 1180, 720)
+
+	if !tt.HasText("Sign in") {
+		t.Fatalf("the login card did not show: %q", tt.Texts())
+	}
+	if tt.HasText("Pods") || tt.HasText("api-7d9f8c-x2k4p") {
+		t.Fatalf("the dashboard showed before signing in: %q", tt.Texts())
+	}
+	if a.signedIn {
+		t.Fatal("a fresh app is signed in")
+	}
+}
+
+// Typing the wrong password keeps the card and shows no dashboard; editing
+// a field clears the error.
+func TestLoginRejectsWrongPassword(t *testing.T) {
+	a := newApp()
+	tt := ui.NewTester(a.view, 1180, 720)
+
+	if err := tt.Click("Username input"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type(demoUsername)
+	if err := tt.Click("Password input"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("nope")
+	if err := tt.Click("Sign in"); err != nil {
+		t.Fatal(err)
+	}
+	if a.signedIn {
+		t.Fatal("signed in with the wrong password")
+	}
+	if !tt.HasText("Wrong username or password") {
+		t.Fatalf("no error for the wrong password: %q", tt.Texts())
+	}
+	if tt.HasText("api-7d9f8c-x2k4p") {
+		t.Fatalf("the dashboard showed after a wrong password: %q", tt.Texts())
+	}
+
+	// Typing clears the error, but the card stays.
+	if err := tt.Click("Password input"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("x")
+	if tt.HasText("Wrong username or password") {
+		t.Fatalf("the error outlived the edit: %q", tt.Texts())
+	}
+	if a.signedIn {
+		t.Fatal("signed in while correcting the password")
+	}
+}
+
+// The demo account opens the dashboard and drops the password.
+func TestLoginAcceptsDemoAccount(t *testing.T) {
+	a := newApp()
+	tt := ui.NewTester(a.view, 1180, 720)
+
+	if err := tt.Click("Username input"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type(demoUsername)
+	if err := tt.Click("Password input"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type(demoPassword)
+	if err := tt.Click("Sign in"); err != nil {
+		t.Fatal(err)
+	}
+
+	if !a.signedIn {
+		t.Fatalf("not signed in with the demo account: %q", tt.Texts())
+	}
+	if a.password != "" {
+		t.Errorf("password kept after signing in: %q", a.password)
+	}
+	if !tt.HasText("api-7d9f8c-x2k4p") {
+		t.Fatalf("the dashboard did not show: %q", tt.Texts())
+	}
+}
+
+// Enter submits from the password field, after Tab from the username field.
+func TestEnterSubmitsLogin(t *testing.T) {
+	a := newApp()
+	tt := ui.NewTester(a.view, 1180, 720)
+
+	if err := tt.Click("Username input"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type(demoUsername)
+	tt.Key(0, ui.KeyTab)
+	tt.Type(demoPassword)
+	tt.Key(0, ui.KeyEnter)
+
+	if !a.signedIn {
+		t.Fatalf("Enter did not submit the login: %q", tt.Texts())
+	}
+	if !tt.HasText("api-7d9f8c-x2k4p") {
+		t.Fatalf("the dashboard did not show after Enter: %q", tt.Texts())
+	}
+}
+
+// Signing out returns to the card, keeps the username, and clears the rest.
+func TestSignOut(t *testing.T) {
+	a := newApp()
+	tt := ui.NewTester(a.view, 1180, 720)
+	signIn(t, a, tt)
+
+	if err := tt.Click("Sign out"); err != nil {
+		t.Fatal(err)
+	}
+	if a.signedIn {
+		t.Fatal("still signed in after Sign out")
+	}
+	if a.password != "" || a.authErr != "" {
+		t.Fatalf("sign out kept password %q or error %q", a.password, a.authErr)
+	}
+	if !tt.HasText("Sign in") {
+		t.Fatalf("the login card did not return: %q", tt.Texts())
+	}
+	if tt.HasText("api-7d9f8c-x2k4p") {
+		t.Fatalf("the dashboard outlived sign out: %q", tt.Texts())
+	}
+}
+
 // The view runs without a window in tests, which click as a user would.
 func TestResourceSwitching(t *testing.T) {
 	a := newApp()
 	tt := ui.NewTester(a.view, 1180, 720)
+	signIn(t, a, tt)
 
 	// The default kind shows its first object in the table and inspector.
 	if !tt.HasText("Pods") || !tt.HasText("api-7d9f8c-x2k4p") {
