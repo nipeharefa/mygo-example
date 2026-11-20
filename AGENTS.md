@@ -85,7 +85,7 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `ndi_other.go` | The `!darwin` stub: keeps Windows and Linux builds compiling, hides the toggle and ignores a start. |
 | `mygo.config.ts` | Packaging: name, identifier, output directory. `devUrl`, `devCommand`, `buildCommand` and `frontendDist` are inert for a native view. |
 | `src/`, `index.html`, `vite.config.ts` | Leftover web template; nothing renders it. |
-| `.github/workflows/ci.yml` | The test gate, a native Windows run that launches the binary, and the macOS/Windows/Linux packaging matrix. |
+| `.github/workflows/ci.yml` | The test gate, a native Windows run that launches the binary, the macOS/Windows/Linux packaging matrix, and a release job on `v*` tags. |
 | `docs/architecture.md` | How the app works; read this next. |
 | `docs/superpowers/plans/` | Historical, already-implemented plan; its numbers have drifted from the code. |
 

@@ -418,6 +418,12 @@ macOS, Windows and Linux as artifacts. In a sandboxed agent session, set
 `GOCACHE` to a writable directory; the default `~/Library/Caches/go-build`
 is denied.
 
+A push of a `v*` tag also runs the `Release` job: it refuses a tag that
+disagrees with `version` in `mygo.config.ts`, downloads the matrix's
+artifacts and publishes them as a GitHub release. Tags with a hyphen
+(`v0.1.0-beta.1`) publish as prereleases, which is what a beta should be;
+re-running a tag replaces its assets instead of failing.
+
 A cross-compile to Linux without `CGO_ENABLED=0` fails inside the
 standard library ("implicit declaration of function 'setresgid'"), which
 is why the flag belongs on every build, not only on the host one.

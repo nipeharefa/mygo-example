@@ -3,16 +3,18 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# A newer push or pull request run supersedes the one before it.
+# A newer push or pull request run supersedes the one before it; a tag run
+# publishes a release, so it is never cancelled by a later push.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   test:
@@ -93,8 +95,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y nsis
       - name: Build the apps
         run: bun run build -- -platform "${{ matrix.platform }}"
-      # No updates configuration yet, so the installers are artifacts of
-      # this run rather than uploads to a release.
+      # Artifacts expire with the run; a v* tag also turns them into a
+      # release, in the job below.
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
@@ -105,3 +107,45 @@ jobs:
             build/*/*-setup-*.exe
             build/*/*.deb
             build/*/*.tar.gz
+
+  release:
+    name: Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      # The installers carry the version from mygo.config.ts, so a tag that
+      # disagrees would publish files named after a different release.
+      - name: Check the tag against mygo.config.ts
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          got=$(sed -n 's/.*version: "\(.*\)".*/\1/p' mygo.config.ts)
+          if [ "$want" != "$got" ]; then
+            echo "tag $GITHUB_REF_NAME does not match version \"$got\" in mygo.config.ts"
+            exit 1
+          fi
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+      - name: List the assets
+        run: find dist -type f | sort
+      # Tags with a hyphen, such as v0.1.0-beta.1, publish as prereleases.
+      # Re-running a tag replaces its assets instead of failing.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          files=(dist/*/*)
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+            exit 0
+          fi
+          extra=()
+          case "$tag" in *-*) extra+=(--prerelease) ;; esac
+          gh release create "$tag" "${files[@]}" --title "$tag" --generate-notes "${extra[@]}"
+
