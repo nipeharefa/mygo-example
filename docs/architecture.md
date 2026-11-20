@@ -218,18 +218,37 @@ panics are caught and turned into `ndiErr`, so a Mac without NDI Tools
 gets the error strip instead of a crash.
 
 The Windows build binds the NDI runtime by hand because `purego` has no
-`Dlopen` on Windows: `loadNDI` tries the bare DLL name (`PATH`), then
-`NDI_RUNTIME_DIR_V6`/`V5`, then the default install directories, and
-resolves `NDIlib_initialize`, `NDIlib_send_create_v2`,
-`NDIlib_send_send_video_v2` and `NDIlib_send_destroy`, calling them
-through `syscall.SyscallN`. `ndiVideoFrame` and `ndiSendCreate` mirror
-the C structs field for field; `ndi_windows_test.go` pins every offset
-and size, because a wrong layout does not fail loudly — it makes the
-NDI runtime read garbage. Capture uses `PrintWindow(hwnd, dc,
-PW_RENDERFULLCONTENT)` into a top-down `CreateDIBSection` bitmap, the
-same call the MyGo test hooks use, and sets the fourth byte of each pixel
-to 0xff since GDI leaves alpha at zero and NDI would read that as
-transparent.
+`Dlopen` on Windows. An NDI 6 runtime does not export the individual
+functions, so `loadNDI` first looks for the versioned table
+(`NDIlib_v6_3_load`, then `NDIlib_v6_load`, then `NDIlib_v5_load`) and
+reads `initialize`, `send_create`, `send_destroy` and
+`send_send_video_v2` from indices 0, 8, 9 and 50. The table is
+append-only, so an entry keeps its index across releases, which is why the
+indices are constants — `TestNDITableIndices` guards them, and they were
+checked against a real runtime by comparing them with the functions the
+library also exports by name. Only if no table exists does it fall back to
+the named exports (`NDIlib_initialize`, `NDIlib_send_create`,
+`NDIlib_send_destroy`, `NDIlib_send_send_video_v2`) for an older runtime.
+Either way the calls go through `syscall.SyscallN`.
+
+`NDIlib_send_create_v2` is gone from the current SDK — the export is
+`NDIlib_send_create`, and it takes the same four-field settings struct.
+Assuming the older name is what a Windows runtime exports was the bug that
+made the app report "exports no NDIlib_send_create_v2".
+
+The DLL is looked for in `NDI_RUNTIME_DIR_V6`/`V5`, then the standalone
+runtime and NDI Tools install folders under `Program Files`, and only then
+by bare name on `PATH`, so an unrelated older copy cannot win. When a file
+is found but will not load, the error says so rather than reporting NDI as
+missing.
+
+`ndiVideoFrame` and `ndiSendCreate` mirror the C structs field for field;
+`ndi_windows_test.go` pins every offset and size, because a wrong layout
+does not fail loudly — it makes the NDI runtime read garbage. Capture uses
+`PrintWindow(hwnd, dc, PW_RENDERFULLCONTENT)` into a top-down
+`CreateDIBSection` bitmap, the same call the MyGo test hooks use, and sets
+the fourth byte of each pixel to 0xff since GDI leaves alpha at zero and
+NDI would read that as transparent.
 
 On Linux the `GtkWindow*` from `NativeHandle` is converted with
 `gtk_widget_get_window`, and `gdk_pixbuf_get_from_window` reads the
@@ -400,6 +419,11 @@ and `Type`/`Key` drive the focused input.
 - `TestNDIFrameLayout` (Windows only) — pins every field offset and the
   size of `ndiVideoFrame` and `ndiSendCreate` to what the NDI C ABI
   declares.
+- `TestNDITableIndices` (Windows only) — pins the four table indices the
+  binding calls through; a drifted index would call into the wrong entry.
+- `TestNDIRejectsForeignLibrary` (Windows only) — resolving
+  `kernel32.dll` fails as an error, so a non-NDI DLL is reported, not
+  called.
 - `TestStopNDIWithoutSender` — `stopNDI` with nothing running is a no-op.
 
 The toggle pair is written so each build runs exactly one of them: the

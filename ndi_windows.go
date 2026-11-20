@@ -31,7 +31,21 @@ const (
 	srcCopy                = 0x00CC0020
 	dibRGBColors           = 0
 	ndiFrameProgressive    = 1
+
+	// The runtime hands out its functions as one versioned table
+	// (Processing.NDI.DynamicLoad.h). That table only ever grows, so an
+	// entry keeps its index across releases and these positions hold for
+	// every runtime that can load a sender.
+	ndiTableInitialize  = 0
+	ndiTableSendCreate  = 8
+	ndiTableSendDestroy = 9
+	ndiTableSendVideo   = 50
+	ndiTableSize        = ndiTableSendVideo + 1
 )
+
+// ndiLoadNames are the table entry points, newest first. A runtime exports
+// the one it was built as, and the older names stay for compatibility.
+var ndiLoadNames = []string{"NDIlib_v6_3_load", "NDIlib_v6_load", "NDIlib_v5_load"}
 
 // ndiSendCreate mirrors NDIlib_send_create_t: two strings, then two bools.
 type ndiSendCreate struct {
@@ -75,12 +89,13 @@ func ndiDLLName() string {
 }
 
 // ndiDLLCandidates lists the places the installer may have left the
-// runtime, most specific first. The bare name lets the loader search PATH.
+// runtime, most specific first. The bare name lets the loader search PATH,
+// which is why it comes last: another program's older copy should not win.
 // NDI Tools and the standalone NDI Runtime use different folder names, and
 // either can be the only thing installed, so both are listed.
 func ndiDLLCandidates() []string {
 	name := ndiDLLName()
-	paths := []string{name}
+	var paths []string
 	for _, env := range []string{ndiRuntimeDirV6, ndiRuntimeDirV5} {
 		if dir := os.Getenv(env); dir != "" {
 			paths = append(paths, filepath.Join(dir, name))
@@ -99,7 +114,7 @@ func ndiDLLCandidates() []string {
 	} {
 		paths = append(paths, filepath.Join(dir, name))
 	}
-	return paths
+	return append(paths, name)
 }
 
 // loadNDI finds the runtime and resolves what the sender needs. It tells a
@@ -117,27 +132,10 @@ func loadNDI() (*ndiLibrary, error) {
 			}
 			continue
 		}
-		lib := &ndiLibrary{handle: uintptr(handle)}
-		missing := false
-		for _, sym := range []struct {
-			name string
-			addr *uintptr
-		}{
-			{"NDIlib_initialize", &lib.initialize},
-			{"NDIlib_send_create_v2", &lib.sendCreate},
-			{"NDIlib_send_send_video_v2", &lib.sendVideo},
-			{"NDIlib_send_destroy", &lib.sendDestroy},
-		} {
-			addr, err := syscall.GetProcAddress(handle, sym.name)
-			if err != nil {
-				broken = fmt.Errorf("%s exports no %s: %w", path, sym.name, err)
-				missing = true
-				break
-			}
-			*sym.addr = addr
-		}
-		if missing {
+		lib, err := resolveNDI(handle)
+		if err != nil {
 			syscall.FreeLibrary(handle)
+			broken = fmt.Errorf("%s: %w", path, err)
 			continue
 		}
 		return lib, nil
@@ -147,6 +145,80 @@ func loadNDI() (*ndiLibrary, error) {
 	}
 	return nil, fmt.Errorf("the NDI runtime is not installed, install NDI Tools: no %s on PATH, in %s, or under %s",
 		ndiDLLName(), ndiRuntimeDirV6, filepath.Join(os.Getenv("ProgramFiles"), "NDI"))
+}
+
+// resolveNDI looks for the individual entry points first, then for the
+// versioned table they are usually reached through.
+func resolveNDI(handle syscall.Handle) (*ndiLibrary, error) {
+	if lib, err := resolveNames(handle); err == nil {
+		return lib, nil
+	}
+	lib, err := resolveTable(handle)
+	if err != nil {
+		return nil, fmt.Errorf("the runtime exports no NDI sender: %w", err)
+	}
+	return lib, nil
+}
+
+// resolveNames binds the functions directly, which is how older runtimes
+// export them.
+func resolveNames(handle syscall.Handle) (*ndiLibrary, error) {
+	lib := &ndiLibrary{handle: uintptr(handle)}
+	for _, sym := range []struct {
+		name string
+		addr *uintptr
+	}{
+		{"NDIlib_initialize", &lib.initialize},
+		{"NDIlib_send_create", &lib.sendCreate},
+		{"NDIlib_send_destroy", &lib.sendDestroy},
+		{"NDIlib_send_send_video_v2", &lib.sendVideo},
+	} {
+		addr, err := syscall.GetProcAddress(handle, sym.name)
+		if err != nil {
+			return nil, fmt.Errorf("no %s: %w", sym.name, err)
+		}
+		*sym.addr = addr
+	}
+	return lib, nil
+}
+
+// resolveTable calls the versioned load function and reads the pointers it
+// returns. NDI 6 on Windows exports the table, not the functions, so this is
+// the path that keeps it working.
+func resolveTable(handle syscall.Handle) (*ndiLibrary, error) {
+	var last error
+	for _, name := range ndiLoadNames {
+		addr, err := syscall.GetProcAddress(handle, name)
+		if err != nil {
+			last = fmt.Errorf("no %s: %w", name, err)
+			continue
+		}
+		table, _, _ := syscall.SyscallN(addr)
+		if table == 0 {
+			last = fmt.Errorf("%s returned no table", name)
+			continue
+		}
+		entries := (*[ndiTableSize]uintptr)(pointerTo(table))
+		lib := &ndiLibrary{
+			handle:      uintptr(handle),
+			initialize:  entries[ndiTableInitialize],
+			sendCreate:  entries[ndiTableSendCreate],
+			sendDestroy: entries[ndiTableSendDestroy],
+			sendVideo:   entries[ndiTableSendVideo],
+		}
+		if lib.initialize == 0 || lib.sendCreate == 0 || lib.sendDestroy == 0 || lib.sendVideo == 0 {
+			last = fmt.Errorf("%s has gaps in the sender entries", name)
+			continue
+		}
+		return lib, nil
+	}
+	return nil, last
+}
+
+// pointerTo reinterprets address bits as a pointer without a uintptr to
+// pointer conversion, which go vet rejects.
+func pointerTo(bits uintptr) unsafe.Pointer {
+	return *(*unsafe.Pointer)(unsafe.Pointer(&bits))
 }
 
 // call invokes one of the entry points; Windows passes arguments in

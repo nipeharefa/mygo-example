@@ -5,6 +5,7 @@ package main
 import (
 	"path/filepath"
 	"slices"
+	"syscall"
 	"testing"
 	"unsafe"
 )
@@ -66,8 +67,30 @@ func TestNDICandidatesCoverBothInstallers(t *testing.T) {
 			t.Errorf("the candidate list has no %s; it has %v", want, candidates)
 		}
 	}
-	if candidates[0] != ndiDLLName() {
-		t.Errorf("the bare DLL name should be tried first, so PATH wins; got %q", candidates[0])
+	if last := candidates[len(candidates)-1]; last != ndiDLLName() {
+		t.Errorf("the bare DLL name should be tried last, after the install folders; got %q", last)
+	}
+}
+
+// A DLL that is not an NDI runtime must be reported as such, not crash and
+// not be mistaken for a working one.
+func TestNDIRejectsForeignLibrary(t *testing.T) {
+	handle, err := syscall.LoadLibrary("kernel32.dll")
+	if err != nil {
+		t.Fatalf("loading kernel32: %v", err)
+	}
+	defer syscall.FreeLibrary(handle)
+	if _, err := resolveNDI(handle); err == nil {
+		t.Fatal("a library without NDI entry points should not resolve")
+	}
+}
+
+// The table indices are the ABI, so a wrong constant would call into the
+// middle of the struct and take the process down on the first frame.
+func TestNDITableIndices(t *testing.T) {
+	if ndiTableInitialize != 0 || ndiTableSendCreate != 8 || ndiTableSendDestroy != 9 || ndiTableSendVideo != 50 {
+		t.Fatalf("table indices drifted: initialize %d, send_create %d, send_destroy %d, send_video %d",
+			ndiTableInitialize, ndiTableSendCreate, ndiTableSendDestroy, ndiTableSendVideo)
 	}
 }
 

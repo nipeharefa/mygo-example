@@ -54,8 +54,12 @@ and identity rules live in
   `WhenReady`, `OnQuit`), never from the build pass. Every platform reads
   native window objects, so touch them on the main thread only: Linux goes
   through `mygo.RunOnMain` for each frame, because GDK is not thread safe.
-  `ndi_windows_test.go` pins the struct offsets the C ABI requires; run
-  `GOOS=windows go vet ./...` before trusting a change there.
+  `ndi_windows_test.go` pins the struct offsets the C ABI requires and the
+  four indices of the versioned function table; run `GOOS=windows go
+  vet ./...` before trusting a change there. Resolve the runtime through
+  that table first — an NDI 6 runtime does not export the individual
+  functions, and `NDIlib_send_create_v2` no longer exists in the SDK (the
+  export is `NDIlib_send_create`).
 
 ## Commands
 
