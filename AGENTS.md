@@ -89,6 +89,7 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `main_test.go` | The headless view tests: sign-in gate, validation, Enter submit, sign-out, kind switching, the NDI toggle without a window, and its off-macOS absence. |
 | `ndi_darwin.go` | The NDI sender: `CGWindowListCreateImage` capture of our own window through `purego`, then `gondi` frames. |
 | `ndi_other.go` | The `!darwin` stub: keeps Windows and Linux builds compiling, hides the toggle and ignores a start. |
+| `README.md` | What a downloader needs: installers, the demo account, and the per-platform instructions for getting the window into OBS. Keep its Windows section honest — the app publishes NDI on macOS only. |
 | `mygo.config.ts` | Packaging: name, identifier, output directory. `devUrl`, `devCommand`, `buildCommand` and `frontendDist` are inert for a native view. |
 | `src/`, `index.html`, `vite.config.ts` | Leftover web template; nothing renders it. |
 | `.github/workflows/ci.yml` | The test gate, a native Windows run that launches the binary, the macOS/Windows/Linux packaging matrix, and a release job on `v*` tags. |
