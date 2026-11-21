@@ -86,10 +86,12 @@ func TestNDIRejectsForeignLibrary(t *testing.T) {
 	}
 }
 
-// A window handle of zero is the state before the first frame, and it must
-// fail as an error rather than as a crash.
-func TestNDIStartWithoutWindow(t *testing.T) {
-	if _, err := startNDISender(nil); err == nil {
-		t.Fatal("starting the sender without a window should fail")
+// With no runtime installed a start must fail as an error rather than as a
+// crash. A machine that has NDI Tools installed reports a refusal instead.
+func TestNDIStartWithoutRuntime(t *testing.T) {
+	if _, err := startNDISender(func(stop chan struct{}) ndiFrameSource {
+		return &fakeSource{}
+	}, 1280, 720); err == nil {
+		t.Fatal("starting the sender without a runtime should fail")
 	}
 }

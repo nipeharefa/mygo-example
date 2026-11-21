@@ -9,7 +9,7 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// ndiSupported reports whether this build can publish the window; the three
+// ndiSupported reports whether this build can publish the stage; the three
 // platforms with a binding can, so the toggle is hidden elsewhere.
 func ndiSupported() bool { return false }
 
@@ -33,7 +33,11 @@ func (s *ndiStream) snapshot() ndiStats { return ndiStats{} }
 func (s *ndiStream) Stop() {}
 
 // startNDISender is the safety net behind startNDI, which already returns
-// early on a build without a sender.
-func startNDISender(*mygo.Window) (*ndiStream, error) {
+// early on a build without a sender. The source the app would hand it is a
+// type only the platforms with a sender have, so it stands in its place.
+func startNDISender(newSource func(stop chan struct{}) interface{}, w, h int) (*ndiStream, error) {
 	return nil, errors.New("NDI output is not supported on this platform")
 }
+
+// ndiFrameSize is the size asked for: there is no HD cap to apply here.
+func ndiFrameSize(w, h int) (int, int) { return w, h }

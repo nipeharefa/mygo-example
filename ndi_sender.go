@@ -13,16 +13,14 @@ import (
 	"unsafe"
 
 	"github.com/ebitengine/purego"
-	"github.com/egoist/mygo"
 )
 
 // The NDI runtime at runtime, shared by every platform that publishes the
-// window. NDI 5 and 6 hand out their functions as one versioned table; the
-// per-platform files only say where the library is and how to capture the
-// window.
+// stage. NDI 5 and 6 hand out their functions as one versioned table; the
+// per-platform files only say where the library is and how to reach it.
 const (
 
-	// ndiFrameRate paces the capture loop: sending with the video clock on
+	// ndiFrameRate paces the frame loop: sending with the video clock on
 	// blocks until the next frame is due, so the loop cannot outrun it.
 	ndiFrameRate = 30
 
@@ -41,6 +39,12 @@ const (
 	ndiTableSendDestroy = 9
 	ndiTableSendVideo   = 50
 	ndiTableSize        = ndiTableSendVideo + 1
+
+	// The NDI feed is capped at HD. The stage renders at whatever size it
+	// is asked for, and a larger one costs bandwidth for no visible gain
+	// on a projector.
+	ndiMaxFrameWidth  = 1920
+	ndiMaxFrameHeight = 1080
 )
 
 // ndiLoadNames are the table entry points, newest first. A runtime exports
@@ -179,46 +183,32 @@ func bindNames(handle uintptr) (*ndiRuntime, error) {
 	return rt, nil
 }
 
-// windowFrame is one captured image, top row first, four BGRA bytes a
+// ndiFrame is one image for the feed, top row first, four BGRA bytes a
 // pixel.
-type windowFrame struct {
+type ndiFrame struct {
 	pix    []byte
 	stride int
 	w, h   int
 }
 
-// ndiCapturer grabs one image of the app's own window.
-type ndiCapturer interface {
-	capture() (windowFrame, bool)
+// ndiFrameSource draws one frame for the feed at the requested size.
+type ndiFrameSource interface {
+	frame(w, h int) (ndiFrame, bool)
 }
 
-// waitFrame retries capture until the window shows something, so a start
-// fails with a message instead of a stream of nothing.
-func waitFrame(c ndiCapturer, timeout time.Duration) (windowFrame, bool) {
-	deadline := time.Now().Add(timeout)
-	for {
-		if f, ok := captureFrame(c); ok {
-			return f, true
-		}
-		if time.Now().After(deadline) {
-			return windowFrame{}, false
-		}
-		time.Sleep(time.Second / ndiFrameRate)
-	}
-}
-
-// ndiStream publishes a window as one NDI source until Stop.
+// ndiStream publishes one source's frames as one NDI source until Stop.
 type ndiStream struct {
 	rt   *ndiRuntime
 	send uintptr
-	capt ndiCapturer
+	src  ndiFrameSource
+	w, h int
 	stop chan struct{}
 	done chan struct{}
 	once sync.Once
 
 	mu        sync.Mutex
 	frames    int64 // frames handed to the sender
-	dropped   int64 // capture attempts that had nothing to send
+	dropped   int64 // draws that had nothing to send
 	width     int   // the last frame's size, which is what the feed sends
 	height    int
 	first     time.Time // when the first frame went out; zero until then
@@ -237,7 +227,7 @@ type ndiStats struct {
 }
 
 // snapshot reads the counters for a view. The frame rate is measured, not
-// taken from the frame header, so a stalled capture shows a falling rate.
+// taken from the frame header, so a stalled source shows a falling rate.
 func (s *ndiStream) snapshot() ndiStats {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -270,7 +260,7 @@ func (s *ndiStream) sent(w, h int) {
 	s.width, s.height = w, h
 }
 
-// skipped records a capture that found nothing to send.
+// skipped records a draw that found nothing to send.
 func (s *ndiStream) skipped() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -284,19 +274,11 @@ func (s *ndiStream) failed(err error) {
 	s.lastErr = err.Error()
 }
 
-// startNDISender opens the NDI runtime and starts sending frames of win. It
-// must run on the main thread, because it reads the window handle.
-func startNDISender(win *mygo.Window) (*ndiStream, error) {
-	if win == nil {
-		return nil, errors.New("NDI output needs the live window")
-	}
-	capt, err := newWindowCapturer(win.NativeHandle())
-	if err != nil {
-		return nil, err
-	}
-	if _, ok := waitFrame(capt, 2*time.Second); !ok {
-		return nil, errors.New(ndiCaptureFailure())
-	}
+// startNDISender opens the NDI runtime and starts sending frames of the
+// source at w×h. newSource builds that source from the stream's stop
+// channel, so it is called once the stream exists and can give up when the
+// stream stops.
+func startNDISender(newSource func(stop chan struct{}) ndiFrameSource, w, h int) (*ndiStream, error) {
 	rt, err := loadNDI()
 	if err != nil {
 		return nil, err
@@ -314,12 +296,19 @@ func startNDISender(win *mygo.Window) (*ndiStream, error) {
 		rt.close()
 		return nil, errors.New("the NDI runtime refused to create a sender")
 	}
-	s := &ndiStream{rt: rt, send: send, capt: capt, stop: make(chan struct{}), done: make(chan struct{})}
+	s := &ndiStream{rt: rt, send: send, w: w, h: h, stop: make(chan struct{}), done: make(chan struct{})}
+	s.src = newSource(s.stop)
 	go s.run()
+	// The sender exists by now, so a source that cannot draw is a clear
+	// error instead of source discovery for a stream of nothing.
+	if _, ok := s.src.frame(w, h); !ok {
+		s.Stop()
+		return nil, errors.New(ndiCaptureFailure())
+	}
 	return s, nil
 }
 
-// run captures and sends until Stop closes the stop channel.
+// run draws and sends until Stop closes the stop channel.
 func (s *ndiStream) run() {
 	defer close(s.done)
 	frame := ndiVideoFrame{
@@ -335,12 +324,12 @@ func (s *ndiStream) run() {
 			return
 		default:
 		}
-		shot, ok := captureFrame(s.capt)
+		shot, ok := s.src.frame(s.w, s.h)
 		if !ok {
 			s.skipped()
-			// Nothing to show right now (the window is minimized, hidden,
-			// or on a screen reader that refuses); the consumer keeps the
-			// last frame.
+			// Nothing to show right now (the stage is not rendering yet,
+			// or the main thread is busy); the consumer keeps the last
+			// frame.
 			select {
 			case <-s.stop:
 				return
@@ -357,7 +346,7 @@ func (s *ndiStream) run() {
 	}
 }
 
-// Stop stops the capture loop and removes the source from discovery.
+// Stop stops the frame loop and removes the source from discovery.
 func (s *ndiStream) Stop() {
 	s.once.Do(func() {
 		close(s.stop)
@@ -367,5 +356,5 @@ func (s *ndiStream) Stop() {
 	})
 }
 
-// ndiSupported reports whether this build can publish the window.
+// ndiSupported reports whether this build can publish the stage.
 func ndiSupported() bool { return true }

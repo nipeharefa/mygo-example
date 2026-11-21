@@ -8,14 +8,14 @@ import (
 	"time"
 )
 
-// fakeCapturer stands in for a platform window capture, so the frame loop's
-// counters can be tested without a window or an NDI runtime.
-type fakeCapturer struct {
-	shot windowFrame
+// fakeSource stands in for the stage renderer, so the frame loop's counters
+// can be tested without a window or an NDI runtime.
+type fakeSource struct {
+	shot ndiFrame
 	ok   bool
 }
 
-func (f *fakeCapturer) capture() (windowFrame, bool) { return f.shot, f.ok }
+func (f *fakeSource) frame(w, h int) (ndiFrame, bool) { return f.shot, f.ok }
 
 func TestNDIStatsSnapshot(t *testing.T) {
 	s := &ndiStream{}
