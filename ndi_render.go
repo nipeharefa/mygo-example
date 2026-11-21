@@ -29,11 +29,16 @@ func renderFrame(img *image.RGBA) ndiFrame {
 	return ndiFrame{pix: pix, stride: 4 * w, w: w, h: h}
 }
 
-// ndiRenderSize fits a requested size into the HD cap, keeping the aspect
-// ratio and even dimensions. The size asked for stays as it is.
+// ndiRenderSize is the size the feed renders at: the size asked for, fitted
+// into the HD cap by the one size policy, ndiFrameSize.
 func ndiRenderSize(w, h int) (int, int) {
+	return ndiFrameSize(w, h)
+}
+
+// ndiFrameSize fits a requested frame into the HD cap, keeping its aspect
+// ratio. A size already at or below the cap is kept as it is.
+func ndiFrameSize(w, h int) (int, int) {
 	scale := 1.0
-	// The size asked for stays as it is when it already fits.
 	if w > ndiMaxFrameWidth {
 		scale = float64(ndiMaxFrameWidth) / float64(w)
 	}

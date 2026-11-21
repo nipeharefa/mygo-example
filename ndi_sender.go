@@ -162,7 +162,8 @@ func bindTable(handle uintptr) (*ndiRuntime, error) {
 }
 
 // bindNames binds the functions directly, which is how an older runtime
-// exports them.
+// exports them. It calls purego.RegisterFunc itself: there is no
+// per-platform registerFunc helper.
 func bindNames(handle uintptr) (*ndiRuntime, error) {
 	rt := &ndiRuntime{}
 	for _, sym := range []struct {

@@ -38,6 +38,3 @@ func (s *ndiStream) Stop() {}
 func startNDISender(newSource func(stop chan struct{}) interface{}, w, h int) (*ndiStream, error) {
 	return nil, errors.New("NDI output is not supported on this platform")
 }
-
-// ndiFrameSize is the size asked for: there is no HD cap to apply here.
-func ndiFrameSize(w, h int) (int, int) { return w, h }
