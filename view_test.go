@@ -158,7 +158,7 @@ func TestLibraryShowsSongs(t *testing.T) {
 	if !tt.HasText("All Creatures of Our God and King") {
 		t.Fatalf("a song is missing from the library: %q", tt.Texts())
 	}
-	for _, want := range []string{"Open output", "Run of show", "On stage"} {
+	for _, want := range []string{"Open output", "Run of show", "STAGE · LIVE", "MONITOR · PREVIEW"} {
 		if !tt.HasText(want) {
 			t.Fatalf("the console is missing %q: %q", want, tt.Texts())
 		}
@@ -272,7 +272,59 @@ func TestEmptyDeckState(t *testing.T) {
 	if !tt.HasText("Nothing on stage yet.") {
 		t.Fatalf("no empty state in the deck: %q", tt.Texts())
 	}
-	if !tt.HasText("No slide") {
+	if !tt.HasText("Nothing on stage") {
 		t.Fatalf("no empty state on the stage card: %q", tt.Texts())
+	}
+	if !tt.HasText("Nothing selected") {
+		t.Fatalf("no empty state on the monitor card: %q", tt.Texts())
+	}
+}
+
+// Choosing a row moves the monitor only; the stage keeps what the room sees.
+func TestDeckClickMovesOnlyTheMonitor(t *testing.T) {
+	a, tt := signedInApp(t)
+	if err := tt.Click("Slide 2: Amazing Grace · Verse 2"); err != nil {
+		t.Fatal(err)
+	}
+	if a.preview != 1 {
+		t.Fatalf("preview = %d, want 1", a.preview)
+	}
+	if a.stage != 0 {
+		t.Fatalf("clicking a row moved the stage to %d", a.stage)
+	}
+	if !tt.HasText("2 / 4") {
+		t.Fatalf("the monitor counter did not follow the selection: %q", tt.Texts())
+	}
+	if !tt.HasText("LIVE") {
+		t.Fatalf("the live row lost its badge: %q", tt.Texts())
+	}
+}
+
+// Go Live sends the monitor row to the stage.
+func TestGoLiveTakesTheSlide(t *testing.T) {
+	a, tt := signedInApp(t)
+	if err := tt.Click("Slide 3: Amazing Grace · Verse 3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("Go Live"); err != nil {
+		t.Fatal(err)
+	}
+	if a.stage != 2 {
+		t.Fatalf("stage = %d, want 2", a.stage)
+	}
+	if !tt.HasText("3 / 4") {
+		t.Fatalf("the stage counter did not follow Go Live: %q", tt.Texts())
+	}
+}
+
+// Enter on the focused run of show takes the row without a global handler.
+func TestEnterTakesTheSlide(t *testing.T) {
+	a, tt := signedInApp(t)
+	if err := tt.Click("Slide 2: Amazing Grace · Verse 2"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(0, ui.KeyEnter)
+	if a.stage != 1 {
+		t.Fatalf("Enter left the stage at %d, want 1", a.stage)
 	}
 }

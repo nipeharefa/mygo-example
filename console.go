@@ -27,6 +27,9 @@ func (a *app) view(c *ui.Context) {
 	// first, so typing in the search box never moves the deck.
 	c.OnShortcut(0, ui.KeyRight, a.nextSlide)
 	c.OnShortcut(0, ui.KeyLeft, a.prevSlide)
+	c.OnShortcut(0, ui.KeyB, a.toggleBlackout)
+	c.OnWindowShortcut(ui.Cmd, ui.KeyEnter, a.takeSlide)
+	c.OnWindowShortcut(ui.Ctrl, ui.KeyEnter, a.takeSlide)
 	a.shell(c)
 }
 
@@ -282,7 +285,7 @@ func (a *app) service(c *ui.Context) {
 		}
 		ui.List(c, &a.deckList, len(a.deck), func(i int) {
 			a.deckRow(c, i)
-		}).Grow(1)
+		}).Grow(1).OnSubmit(a.takeSlide)
 	})
 }
 
@@ -301,63 +304,75 @@ func (a *app) deckRow(c *ui.Context, i int) {
 			ui.Text(c, s.caption()).FontSize(12).FontWeight(600).SingleLine()
 			ui.Text(c, s.firstLine()).FontSize(10).TextColor(t.TextMuted).SingleLine()
 		})
+		if i == a.stage {
+			ui.Badge(c, "LIVE")
+		}
 	})
 }
 
+// stagePanel has two cards: the stage, what the room and NDI see, and the
+// monitor, the row the operator is working on. Go Live is the only way the
+// stage changes without the live window's own keys.
 func (a *app) stagePanel(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c).Width(stagePanelWidth).FillHeight().Background(t.Surface).Padding(16).Gap(12).Children(func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "On stage").FontSize(10).FontWeight(600).LetterSpacing(0.8).TextColor(t.TextMuted).SingleLine()
-			ui.Spacer(c)
-			ui.Text(c, a.stageCounter()).FontSize(11).TextColor(t.TextMuted).SingleLine()
-		})
-		a.stageCard(c)
-		if up, ok := a.upcomingSlide(); ok {
-			ui.Column(c).Gap(2).Children(func() {
-				ui.Text(c, "Next up").FontSize(10).FontWeight(600).TextColor(t.TextMuted).SingleLine()
-				ui.Text(c, up.caption()).FontSize(11).SingleLine()
+	ui.Column(c).Width(stagePanelWidth).FillHeight().Background(t.Surface).Children(func() {
+		ui.Scroll(c).Fill().Padding(14).Children(func() {
+			ui.Column(c).Gap(10).Children(func() {
+				a.panelHeader(c, "STAGE · LIVE", t.Success, a.stage)
+				a.slideCard(c, a.stageSlide, "Nothing on stage")
+				a.panelHeader(c, "MONITOR · PREVIEW", t.TextMuted, a.preview)
+				a.slideCard(c, a.previewSlide, "Nothing selected")
+
+				ui.PrimaryButton(c, "Go Live").OnClick(a.takeSlide).Disabled(len(a.deck) == 0)
+
+				ui.Row(c).Gap(8).Children(func() {
+					ui.Button(c, "Prev").Label("Previous slide").OnClick(a.prevSlide).Grow(1)
+					ui.Button(c, "Next").Label("Next slide").OnClick(a.nextSlide).Grow(1)
+				})
+				if a.blackout {
+					ui.Button(c, "Clear black out").OnClick(a.toggleBlackout)
+				} else {
+					ui.Button(c, "Black out").OnClick(a.toggleBlackout)
+				}
+				ui.Text(c, "← → monitor · Enter go live · B black out").
+					FontSize(10).TextColor(t.TextMuted)
 			})
-		} else {
-			ui.Column(c).Gap(2).Children(func() {
-				ui.Text(c, "Next up").FontSize(10).FontWeight(600).TextColor(t.TextMuted).SingleLine()
-				ui.Text(c, "End of set").FontSize(11).TextColor(t.TextMuted).SingleLine()
-			})
-		}
-		ui.Spacer(c)
-		ui.Row(c).Gap(8).Children(func() {
-			ui.Button(c, "Prev").Label("Previous slide").OnClick(a.prevSlide).Grow(1)
-			ui.Button(c, "Next").Label("Next slide").OnClick(a.nextSlide).Grow(1)
 		})
-		if a.blackout {
-			ui.Button(c, "Clear black out").OnClick(a.toggleBlackout)
-		} else {
-			ui.Button(c, "Black out").OnClick(a.toggleBlackout)
-		}
-		ui.Text(c, "← → to move · B to black out").FontSize(10).TextColor(t.TextMuted).SingleLine()
 	})
 }
 
-// stageCard previews the slide in the output's own colors, so the operator
-// sees roughly what the room sees.
-func (a *app) stageCard(c *ui.Context) {
+// panelHeader labels a card with a live dot and its position in the deck.
+func (a *app) panelHeader(c *ui.Context, label string, dot ui.Color, i int) {
+	t := c.Theme()
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Box(c).Size(6, 6).Radius(999).Background(dot)
+		ui.Text(c, label).FontSize(10).FontWeight(600).LetterSpacing(0.8).TextColor(t.TextMuted).SingleLine()
+		ui.Spacer(c)
+		ui.Text(c, a.deckCounter(i)).FontSize(10).TextColor(t.TextMuted).SingleLine()
+	})
+}
+
+// slideCard renders one slide in the output's own colors, so both cards
+// look like the room does.
+func (a *app) slideCard(c *ui.Context, get func() (slide, bool), empty string) {
 	st := stageTheme()
 	ui.Column(c).WidthPercent(100).AspectRatio(16.0/9.0).Radius(10).
-		Background(st.Background).Border(1, st.Border).Padding(18).Justify(ui.Center).Children(func() {
-		s, ok := a.stageSlide()
+		Background(st.Background).Border(1, st.Border).Padding(16).Justify(ui.Center).Children(func() {
+		s, ok := get()
 		if !ok {
-			ui.Text(c, "No slide").FontSize(12).TextColor(st.TextMuted).SingleLine()
+			ui.Text(c, empty).FontSize(12).TextColor(st.TextMuted).SingleLine()
 			return
 		}
-		ui.Text(c, s.eyebrow()).FontSize(9).FontWeight(600).LetterSpacing(1.2).TextColor(st.Accent).SingleLine()
-		ui.Text(c, s.Text).FontSize(14).LineHeight(1.35).TextColor(st.Text)
-		ui.Text(c, s.caption()).FontSize(9).TextColor(st.TextMuted).SingleLine()
+		ui.Text(c, s.eyebrow()).FontSize(8).FontWeight(600).LetterSpacing(1.2).TextColor(st.Accent).SingleLine()
+		ui.Text(c, s.Text).FontSize(13).LineHeight(1.35).TextColor(st.Text)
+		ui.Text(c, s.caption()).FontSize(8).TextColor(st.TextMuted).SingleLine()
 	})
 }
 
-func (a *app) stageCounter() string {
+// deckCounter is "row / total" for either card, or 0 / 0 on an empty deck.
+func (a *app) deckCounter(i int) string {
 	if len(a.deck) == 0 {
 		return "0 / 0"
 	}
-	return fmt.Sprintf("%d / %d", a.stage+1, len(a.deck))
+	return fmt.Sprintf("%d / %d", i+1, len(a.deck))
 }
