@@ -118,6 +118,10 @@ the deck.
 - Title `mygo-demo — Live`, 1280×720, minimum 640×360, and
   `BackgroundColor: stageBackgroundHex` so it never flashes white before
   the first frame.
+- `Frameless: true`, so the slide is the whole window: no title bar,
+  traffic lights or resize edges, on screen or in the NDI feed. The slide
+  column calls `DragWindow()`, so dragging anywhere on the slide moves a
+  windowed output.
 - If `secondDisplay()` finds a display that is not the primary one, the
   window's position and size are set to that display's bounds and it opens
   fullscreen. Otherwise it is an ordinary windowed window on the current
@@ -126,7 +130,8 @@ the deck.
 `liveView` draws a black fill while `a.blackout`, and otherwise a centered
 slide (eyebrow, 40 pt text, caption) on the forced-dark stage theme. Its
 shortcuts are → ↓ Space next, ← ↑ prev, B blackout, and Esc, which clears
-fullscreen only when `a.live.IsFullScreen()`.
+fullscreen when `a.live.IsFullScreen()` and closes the output otherwise —
+the only way out of a window with no title bar.
 
 `openOutput` when a window already exists just calls `Show()` and
 `Focus()`. `closeOutput` nils `a.live` first, stops NDI, invalidates the
@@ -148,6 +153,12 @@ runtime discovery, the versioned function table, the sender and the frame
 loop; `ndi_darwin.go`, `ndi_windows.go` and `ndi_linux.go` only bind the
 library and capture the live window (CoreGraphics, GDI, GDK). The source
 is registered as `mygo-demo (Live)`.
+
+The feed is the slide alone, at the capture's own pixel size capped to HD.
+macOS captures the frameless window at the display's pixel density
+(`cgWindowImageBestResolution`) and `ndiFrameSize` scales it down to at
+most 1920×1080 without upscaling, so a Retina window streams crisp 1080p;
+Windows and Linux send the window's client pixels at its DPI.
 
 `MYGO_NDI=1` sets `autoNDI` so opening the output starts streaming
 immediately; otherwise the operator presses **Start NDI** in the console

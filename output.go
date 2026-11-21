@@ -13,10 +13,14 @@ func (a *app) liveView(c *ui.Context) {
 	c.SetTheme(stageTheme())
 	t := c.Theme()
 
+	// The window has no title bar (WindowOptions.Frameless), so the slide
+	// itself is the drag handle when the output is windowed. Dragging over
+	// the text still moves the window: only interactive elements take the
+	// press, and a slide has none.
 	if a.blackout {
-		ui.Column(c).Fill().Background(ui.Hex(stageBackgroundHex))
+		ui.Column(c).Fill().Background(ui.Hex(stageBackgroundHex)).DragWindow()
 	} else {
-		ui.Column(c).Fill().Background(t.Background).Padding(56, 72).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Fill().Background(t.Background).Padding(56, 72).Justify(ui.Center).AlignItems(ui.Center).DragWindow().Children(func() {
 			s, ok := a.currentSlide()
 			if !ok {
 				ui.Text(c, "Nothing on stage").FontSize(24).TextColor(t.TextMuted)
@@ -35,8 +39,13 @@ func (a *app) liveView(c *ui.Context) {
 	c.OnShortcut(0, ui.KeyUp, a.prevSlide)
 	c.OnShortcut(0, ui.KeyB, a.toggleBlackout)
 	c.OnShortcut(0, ui.KeyEscape, func() {
-		if a.live != nil && a.live.IsFullScreen() {
+		switch {
+		case a.live == nil:
+		case a.live.IsFullScreen():
 			a.live.SetFullScreen(false)
+		default:
+			// Windowed: Esc is the only way out of a chromeless window.
+			a.closeOutput()
 		}
 	})
 }
@@ -49,12 +58,15 @@ func (a *app) openOutput() {
 		a.live.Focus()
 		return
 	}
+	// Frameless, so the capture NDI publishes is the slide alone: no title
+	// bar, traffic lights or resize edges in the feed.
 	opts := mygo.WindowOptions{
 		Title:           appTitle + " — Live",
 		Width:           1280,
 		Height:          720,
 		MinWidth:        640,
 		MinHeight:       360,
+		Frameless:       true,
 		BackgroundColor: stageBackgroundHex,
 		Content:         ui.View(a.liveView),
 	}

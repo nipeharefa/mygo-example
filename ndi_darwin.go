@@ -60,10 +60,19 @@ const (
 	// Flags and bitmap settings from CoreGraphics' headers.
 	cgWindowListOptionIncludingWindow = 1 << 3 // kCGWindowListOptionIncludingWindow
 	cgWindowImageBoundsIgnoreFraming  = 1 << 0 // kCGWindowImageBoundsIgnoreFraming
-	cgWindowImageNominalResolution    = 1 << 4 // kCGWindowImageNominalResolution
+	cgWindowImageBestResolution       = 1 << 3 // kCGWindowImageBestResolution
+	cgInterpolationHigh               = 4      // kCGInterpolationHigh
 	cgImageAlphaPremultipliedFirst    = 2      // kCGImageAlphaPremultipliedFirst
 	cgBitmapByteOrder32Little         = 2 << 12
 	cgInterpolationNone               = 1
+)
+
+// The NDI feed is capped at HD. The window server hands back the window at
+// the display's pixel density, which is 2x on a Retina display; sending that
+// unscaled would quadruple the frame size for no visible gain on a projector.
+const (
+	ndiMaxFrameWidth  = 1920
+	ndiMaxFrameHeight = 1080
 )
 
 // cgPoint, cgSize and cgRect mirror CGPoint, CGSize and CGRect: four
@@ -205,22 +214,25 @@ func newWindowCapturer(handle uintptr) (*windowCapturer, error) {
 }
 
 // capture renders the window as the window server shows it: an app reads
-// its own windows without the permission to record the screen. It reports
-// false while the window has no image, which is what an off-screen window
+// its own windows without the permission to record the screen. If it reports
+// false while the window has no image, that is what an off-screen window
 // (minimized, hidden, behind a full screen app, or in another Space) gives.
 func (c *windowCapturer) capture() (windowFrame, bool) {
-	// CGRectNull asks for the window's own bounds, shadow excluded.
+	// CGRectNull asks for the window's own bounds, shadow excluded. Best
+	// resolution keeps text crisp on Retina; the frame is scaled down to HD
+	// below.
 	null := cgRect{Origin: cgPoint{X: math.Inf(1), Y: math.Inf(1)}}
 	img := cgWindowListCreateImage(null, cgWindowListOptionIncludingWindow, c.number,
-		cgWindowImageBoundsIgnoreFraming|cgWindowImageNominalResolution)
+		cgWindowImageBoundsIgnoreFraming|cgWindowImageBestResolution)
 	if img == 0 {
 		return windowFrame{}, false
 	}
 	defer cgImageRelease(img)
-	w, h := int(cgImageGetWidth(img)), int(cgImageGetHeight(img))
-	if w <= 0 || h <= 0 {
+	sw, sh := int(cgImageGetWidth(img)), int(cgImageGetHeight(img))
+	if sw <= 0 || sh <= 0 {
 		return windowFrame{}, false
 	}
+	w, h := ndiFrameSize(sw, sh)
 	if c.frame.w != w || c.frame.h != h {
 		c.frame = windowFrame{w: w, h: h, stride: w * 4, pix: make([]byte, w*h*4)}
 	}
@@ -231,8 +243,38 @@ func (c *windowCapturer) capture() (windowFrame, bool) {
 	if ctx == 0 {
 		return windowFrame{}, false
 	}
-	cgContextSetInterpolationQuality(ctx, cgInterpolationNone)
+	var quality int32 = cgInterpolationHigh
+	if w == sw && h == sh {
+		quality = cgInterpolationNone
+	}
+	cgContextSetInterpolationQuality(ctx, quality)
 	cgContextDrawImage(ctx, cgRect{Size: cgSize{W: float64(w), H: float64(h)}}, img)
 	cgContextRelease(ctx)
 	return c.frame, true
+}
+
+// ndiFrameSize shrinks a captured window to fit the HD cap, keeping its
+// aspect ratio. A window already at or below the cap is sent as captured.
+func ndiFrameSize(w, h int) (int, int) {
+	scale := 1.0
+	if w > ndiMaxFrameWidth {
+		scale = float64(ndiMaxFrameWidth) / float64(w)
+	}
+	if h > ndiMaxFrameHeight && float64(ndiMaxFrameHeight)/float64(h) < scale {
+		scale = float64(ndiMaxFrameHeight) / float64(h)
+	}
+	if scale >= 1 {
+		return w, h
+	}
+	nw, nh := int(math.Round(float64(w)*scale)), int(math.Round(float64(h)*scale))
+	if nw < 1 {
+		nw = 1
+	}
+	if nh < 1 {
+		nh = 1
+	}
+	// Keep the dimensions even, as video encoders prefer 4:2:0 frames.
+	nw &^= 1
+	nh &^= 1
+	return nw, nh
 }

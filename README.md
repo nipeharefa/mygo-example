@@ -46,8 +46,9 @@ the run of show in the middle, and the stage panel on the right.
 
 The console shortcuts are **←** / **→**. In the output window **← → ↑ ↓**
 and **Space** move the slide, **B** toggles blackout, and **Esc** leaves
-fullscreen. The output is windowed on the same display before you drag it
-to a projector; the console can stay with the operator.
+fullscreen; when the output is windowed, **Esc** closes it. The output
+window has no title bar, so drag the slide itself to move it to a
+projector; the console can stay with the operator.
 
 ## The live output as an NDI source
 
@@ -69,8 +70,11 @@ The source is called `mygo-demo (Live)`. Other machines see it as
    (or start the app with `MYGO_NDI=1` in the environment).
 3. In OBS add an **NDI Source**, or open NDI Video Monitor, and pick
    `mygo-demo (Live)`.
-4. The feed is the whole output window at one pixel per point, title bar
-   included when it is windowed. Crop or scale it with an OBS transform.
+4. The feed is the slide alone: the output window has no title bar or
+   window chrome, so no desktop edge frames it. On a Retina display the
+   capture runs at the display's pixel density and is scaled down to at
+   most 1920×1080, so text stays sharp; a fullscreen output on a 1080p
+   projector is native 1080p.
 
 The output window has to be **on screen** while it streams: macOS gives
 an app the image of its own window only while the window server shows it,
@@ -87,8 +91,8 @@ projector is on screen, which is the normal case.
    `C:\Program Files\NDI\NDI 6 Runtime`) and sets `NDI_RUNTIME_DIR_V6`.
    The app searches both folders.
 2. Open the output window, then press **Start NDI** in the console header.
-3. The feed is the output window's client area at one pixel per point, no
-   title bar.
+3. The feed is the slide alone, captured from the window's client area at
+   the display's pixel density; a frameless output sends no window chrome.
 
 To *receive* NDI in OBS you still need the plugin:
 [DistroAV](https://github.com/DistroAV/DistroAV/releases) (formerly
@@ -103,9 +107,9 @@ runtime.
    [NDI Tools](https://ndi.video/tools/) and lands in
    `/usr/local/lib/libndi.so`.
 2. Open the output window, then press **Start NDI** in the console header.
-3. The feed is the output window's client area, captured through GDK, so
-   it works on **X11**. On Wayland the app cannot read its own pixels and
-   the header reports that instead.
+3. The feed is the slide alone, captured through GDK at the window's pixel
+   size, so it works on **X11**. On Wayland the app cannot read its own
+   pixels and the header reports that instead.
 4. To receive it in OBS, install DistroAV from Flatpak or its `.deb`
    release asset; NDI Video Monitor from NDI Tools also works.
 

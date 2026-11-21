@@ -35,7 +35,10 @@ identity rules live in
   method ends with `a.changed()`, which invalidates `a.win` and `a.live`.
   Call it from `OnClick`/`OnSubmit`/`OnChange`/shortcut callbacks, never
   from inside the build pass.
-- **The live window is the output, and NDI publishes only it.** `a.live`
+- **The live window is the output, and NDI publishes only it.** The
+  window is `Frameless`, so the slide fills it and the capture carries no
+  window chrome; the slide columns are `DragWindow()` handles so a
+  windowed output can still be moved. `a.live`
   is created by `openOutput` and nilled in its `OnClosed` (guarded so a
   stale close cannot drop a new window) and in `closeOutput`. `startNDI`
   fails with `NDI output needs the live window` when `a.live == nil`; it
@@ -80,7 +83,10 @@ identity rules live in
   SDK (the export is `NDIlib_send_create`). On macOS the capture only works
   while the window is on screen; that limit is the window server's, so
   report it instead of working around it, and do not add an AppKit pixel
-  readback — objc struct-return through `purego` crashed.
+  readback — objc struct-return through `purego` crashed. macOS captures
+  at the display's pixel density and `ndiFrameSize` scales the frame down
+  to at most 1920×1080 (`ndi_darwin_test.go` pins that rule); Windows and
+  Linux send the window's own client pixels.
 
 ## Commands
 
@@ -126,7 +132,7 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `output_test.go` | Headless output tests: current slide, follow next, blackout hides text, output shortcuts, NDI refuses without the live window. |
 | `ndi_sender.go` | The NDI half every platform shares: candidate walk, versioned-table binding with a named-export fallback, `startNDISender`, the frame loop, `Stop`. |
 | `ndi_sender_test.go` | Proves the table indices (0/8/9/50) match the functions a real installed runtime also exports by name; skips without NDI. |
-| `ndi_darwin.go` | `purego` dlopen/dlsym plus `CGWindowListCreateImage` capture of the live window, title bar included, 1 pt/px, on screen only. |
+| `ndi_darwin.go` | `purego` dlopen/dlsym plus `CGWindowListCreateImage` capture of the frameless live window at the display's pixel density, capped to 1920×1080 by `ndiFrameSize`, on screen only. |
 | `ndi_windows.go` | The NDI sender: `syscall` binding of the NDI DLL plus GDI `PrintWindow` capture into a 32-bit DIB. |
 | `ndi_windows_test.go` | Pins the offsets of `ndiVideoFrame`/`ndiSendCreate` to what the C ABI declares; runs on the Windows CI job. |
 | `ndi_linux.go` | `purego` dlopen/dlsym plus `gdk_pixbuf_get_from_window` capture, marshalled onto the main thread with `mygo.RunOnMain`. |
