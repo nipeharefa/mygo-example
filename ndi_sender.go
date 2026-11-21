@@ -21,7 +21,7 @@ import (
 // per-platform files only say where the library is and how to capture the
 // window.
 const (
-	ndiSourceName = "mygo-demo (Kubernetes)"
+	ndiSourceName = "mygo-demo (Live)"
 
 	// ndiFrameRate paces the capture loop: sending with the video clock on
 	// blocks until the next frame is due, so the loop cannot outrun it.
@@ -222,7 +222,7 @@ type ndiStream struct {
 // must run on the main thread, because it reads the window handle.
 func startNDISender(win *mygo.Window) (*ndiStream, error) {
 	if win == nil {
-		return nil, errors.New("NDI output needs the app window")
+		return nil, errors.New("NDI output needs the live window")
 	}
 	capt, err := newWindowCapturer(win.NativeHandle())
 	if err != nil {

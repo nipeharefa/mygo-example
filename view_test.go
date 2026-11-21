@@ -124,7 +124,9 @@ func TestSignOut(t *testing.T) {
 	tt := ui.NewTester(a.view, consoleWidth, consoleHeight)
 	signIn(t, a, tt)
 
-	a.signOut()
+	if err := tt.Click("Sign out"); err != nil {
+		t.Fatal(err)
+	}
 	tt.Frame()
 
 	if a.signedIn {
@@ -135,5 +137,142 @@ func TestSignOut(t *testing.T) {
 	}
 	if !tt.HasText("Sign in") {
 		t.Fatalf("the login card did not come back: %q", tt.Texts())
+	}
+}
+
+func signedInApp(t *testing.T) (*app, *ui.Tester) {
+	t.Helper()
+	a := newApp()
+	tt := ui.NewTester(a.view, consoleWidth, consoleHeight)
+	signIn(t, a, tt)
+	return a, tt
+}
+
+// The song library lists the songs and offers one Add button per song.
+func TestLibraryShowsSongs(t *testing.T) {
+	_, tt := signedInApp(t)
+
+	if !tt.HasText("Amazing Grace") {
+		t.Fatalf("the song library is empty: %q", tt.Texts())
+	}
+	if !tt.HasText("All Creatures of Our God and King") {
+		t.Fatalf("a song is missing from the library: %q", tt.Texts())
+	}
+	for _, want := range []string{"Open output", "Run of show", "On stage"} {
+		if !tt.HasText(want) {
+			t.Fatalf("the console is missing %q: %q", want, tt.Texts())
+		}
+	}
+}
+
+// Adding a song appends every section and selects the first one.
+func TestAddSongFromLibrary(t *testing.T) {
+	a, tt := signedInApp(t)
+	a.deck, a.index = nil, 0
+	tt.Frame()
+
+	if err := tt.Click("Add Amazing Grace"); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.deck) != 3 {
+		t.Fatalf("deck = %d slides, want 3", len(a.deck))
+	}
+	if !tt.HasText("Verse 1") {
+		t.Fatalf("the deck did not show the song: %q", tt.Texts())
+	}
+}
+
+// The Bible tab swaps in verse packs and adds one verse slide.
+func TestBibleTabAddsVerse(t *testing.T) {
+	a, tt := signedInApp(t)
+	a.deck, a.index = nil, 0
+	tt.Frame()
+
+	if err := tt.Click("Bible"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("Add Psalm 23:1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.deck) != 1 {
+		t.Fatalf("deck = %d slides, want 1", len(a.deck))
+	}
+	if got := a.deck[0].Title; got != "Psalm 23:1" {
+		t.Fatalf("added %q, want Psalm 23:1", got)
+	}
+}
+
+// Searching the library narrows the list without touching the deck.
+func TestSongSearchFilters(t *testing.T) {
+	a, tt := signedInApp(t)
+	a.songQuery = "grace"
+	tt.Frame()
+
+	if !tt.HasText("Amazing Grace") {
+		t.Fatalf("the matching song disappeared: %q", tt.Texts())
+	}
+	if tt.HasText("Holy, Holy, Holy") {
+		t.Fatalf("a non-matching song is still listed: %q", tt.Texts())
+	}
+}
+
+// Arrow keys move the deck; typing in a field does not.
+func TestDeckArrowShortcuts(t *testing.T) {
+	a, tt := signedInApp(t)
+	if a.index != 0 {
+		t.Fatalf("index = %d, want 0", a.index)
+	}
+	tt.Key(0, ui.KeyRight)
+	if a.index != 1 {
+		t.Fatalf("right arrow moved to %d, want 1", a.index)
+	}
+	tt.Key(0, ui.KeyLeft)
+	if a.index != 0 {
+		t.Fatalf("left arrow moved to %d, want 0", a.index)
+	}
+
+	if err := tt.Click("Search songs"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("verse")
+	tt.Key(0, ui.KeyRight)
+	if a.index != 0 {
+		t.Fatalf("the arrow in the search field moved the deck to %d", a.index)
+	}
+}
+
+// Black out flips the status pill and the transport label.
+func TestBlackoutButton(t *testing.T) {
+	a, tt := signedInApp(t)
+
+	if err := tt.Click("Black out"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.blackout {
+		t.Fatal("blackout not enabled")
+	}
+	if !tt.HasText("BLACK") {
+		t.Fatalf("the status pill does not say BLACK: %q", tt.Texts())
+	}
+	if err := tt.Click("Clear black out"); err != nil {
+		t.Fatal(err)
+	}
+	if a.blackout {
+		t.Fatal("blackout not cleared")
+	}
+}
+
+// An emptied deck shows its empty states instead of a blank panel.
+func TestEmptyDeckState(t *testing.T) {
+	a, tt := signedInApp(t)
+	a.deck, a.index = nil, 0
+	tt.Frame()
+
+	if !tt.HasText("Nothing on stage yet.") {
+		t.Fatalf("no empty state in the deck: %q", tt.Texts())
+	}
+	if !tt.HasText("No slide") {
+		t.Fatalf("no empty state on the stage card: %q", tt.Texts())
 	}
 }

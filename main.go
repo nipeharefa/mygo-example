@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"log"
 	"os"
 	"strings"
@@ -80,6 +81,7 @@ func (a *app) signIn() {
 // signOut returns to the login card and drops everything that belonged to
 // the session. The username stays for the next attempt.
 func (a *app) signOut() {
+	a.closeOutput()
 	a.stopNDI()
 	a.signedIn = false
 	a.password = ""
@@ -105,6 +107,9 @@ func (a *app) changed() {
 	}
 }
 
+// startNDI publishes the live window as an NDI source. There is nothing to
+// publish before the output window is open, so that is a clear error rather
+// than a silent no-op.
 func (a *app) startNDI() error {
 	if !ndiSupported() {
 		return nil
@@ -112,7 +117,11 @@ func (a *app) startNDI() error {
 	if a.ndi != nil {
 		return nil
 	}
-	s, err := startNDISender(a.win)
+	if a.live == nil {
+		a.ndiErr = "NDI output needs the live window"
+		return errors.New(a.ndiErr)
+	}
+	s, err := startNDISender(a.live)
 	if err != nil {
 		a.ndiErr = err.Error()
 		return err
