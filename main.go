@@ -48,9 +48,16 @@ type app struct {
 	nextID   int
 	deckList ui.ListState
 
-	win     *mygo.Window
-	live    *mygo.Window
-	autoNDI bool
+	win  *mygo.Window
+	live *mygo.Window
+
+	settings      *mygo.Window
+	help          *mygo.Window
+	settingsDir   string         // app data dir; empty keeps tests headless
+	outputDisplay int64          // 0 = automatic
+	ndiOn         bool           // publish the stage when it opens
+	displays      []mygo.Display // refreshed at startup and on display changes
+	version       string         // mygo.App.Version(); empty under go run
 
 	ndi    *ndiStream
 	ndiErr string
@@ -106,6 +113,12 @@ func (a *app) changed() {
 	if a.live != nil {
 		a.live.Invalidate()
 	}
+	if a.settings != nil {
+		a.settings.Invalidate()
+	}
+	if a.help != nil {
+		a.help.Invalidate()
+	}
 }
 
 // startNDI publishes the live window as an NDI source. There is nothing to
@@ -159,7 +172,7 @@ func (a *app) ndiLabel() string {
 
 func main() {
 	a := newApp()
-	a.autoNDI = os.Getenv("MYGO_NDI") != ""
+	a.ndiOn = os.Getenv("MYGO_NDI") != ""
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:     appTitle,

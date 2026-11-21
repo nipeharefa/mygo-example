@@ -87,7 +87,7 @@ func (a *app) openOutput() {
 		a.live = nil
 		a.changed()
 	})
-	if a.autoNDI {
+	if a.ndiOn {
 		_ = a.startNDI()
 	}
 	a.changed()
