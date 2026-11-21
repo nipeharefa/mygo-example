@@ -12,11 +12,11 @@ func testLive(a *app) *ui.Tester {
 	return ui.NewTester(a.liveView, 1280, 720)
 }
 
-func mustCurrent(t *testing.T, a *app) slide {
+func mustStage(t *testing.T, a *app) slide {
 	t.Helper()
-	s, ok := a.currentSlide()
+	s, ok := a.stageSlide()
 	if !ok {
-		t.Fatal("no current slide")
+		t.Fatal("no slide on stage")
 	}
 	return s
 }
@@ -25,7 +25,7 @@ func mustCurrent(t *testing.T, a *app) slide {
 func TestLiveViewShowsCurrentSlide(t *testing.T) {
 	a := newApp()
 	tt := testLive(a)
-	s := mustCurrent(t, a)
+	s := mustStage(t, a)
 
 	if !tt.HasText(s.firstLine()) {
 		t.Fatalf("the live view does not show %q: %q", s.firstLine(), tt.Texts())
@@ -40,9 +40,9 @@ func TestLiveViewFollowsNext(t *testing.T) {
 	a := newApp()
 	tt := testLive(a)
 
-	a.nextSlide()
+	a.nextStage()
 	tt.Frame()
-	s := mustCurrent(t, a)
+	s := mustStage(t, a)
 	if !tt.HasText(s.firstLine()) {
 		t.Fatalf("after next the live view shows the wrong slide: %q", tt.Texts())
 	}
@@ -52,7 +52,7 @@ func TestLiveViewFollowsNext(t *testing.T) {
 func TestLiveViewBlackoutHidesText(t *testing.T) {
 	a := newApp()
 	tt := testLive(a)
-	s := mustCurrent(t, a)
+	s := mustStage(t, a)
 
 	a.toggleBlackout()
 	tt.Frame()
@@ -67,12 +67,12 @@ func TestLiveViewShortcuts(t *testing.T) {
 	tt := testLive(a)
 
 	tt.Key(0, ui.KeyRight)
-	if a.index != 1 {
-		t.Fatalf("right arrow moved to %d, want 1", a.index)
+	if a.stage != 1 {
+		t.Fatalf("right arrow moved the stage to %d, want 1", a.stage)
 	}
 	tt.Key(0, ui.KeyLeft)
-	if a.index != 0 {
-		t.Fatalf("left arrow moved to %d, want 0", a.index)
+	if a.stage != 0 {
+		t.Fatalf("left arrow moved the stage to %d, want 0", a.stage)
 	}
 	tt.Key(0, ui.KeyB)
 	if !a.blackout {

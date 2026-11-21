@@ -168,7 +168,7 @@ func TestLibraryShowsSongs(t *testing.T) {
 // Adding a song appends every section and selects the first one.
 func TestAddSongFromLibrary(t *testing.T) {
 	a, tt := signedInApp(t)
-	a.deck, a.index = nil, 0
+	a.deck, a.preview, a.stage = nil, 0, 0
 	tt.Frame()
 
 	if err := tt.Click("Add Amazing Grace"); err != nil {
@@ -185,7 +185,7 @@ func TestAddSongFromLibrary(t *testing.T) {
 // The Bible tab swaps in verse packs and adds one verse slide.
 func TestBibleTabAddsVerse(t *testing.T) {
 	a, tt := signedInApp(t)
-	a.deck, a.index = nil, 0
+	a.deck, a.preview, a.stage = nil, 0, 0
 	tt.Frame()
 
 	if err := tt.Click("Bible"); err != nil {
@@ -220,16 +220,16 @@ func TestSongSearchFilters(t *testing.T) {
 // Arrow keys move the deck; typing in a field does not.
 func TestDeckArrowShortcuts(t *testing.T) {
 	a, tt := signedInApp(t)
-	if a.index != 0 {
-		t.Fatalf("index = %d, want 0", a.index)
+	if a.preview != 0 {
+		t.Fatalf("preview = %d, want 0", a.preview)
 	}
 	tt.Key(0, ui.KeyRight)
-	if a.index != 1 {
-		t.Fatalf("right arrow moved to %d, want 1", a.index)
+	if a.preview != 1 {
+		t.Fatalf("right arrow moved to %d, want 1", a.preview)
 	}
 	tt.Key(0, ui.KeyLeft)
-	if a.index != 0 {
-		t.Fatalf("left arrow moved to %d, want 0", a.index)
+	if a.preview != 0 {
+		t.Fatalf("left arrow moved to %d, want 0", a.preview)
 	}
 
 	if err := tt.Click("Search songs"); err != nil {
@@ -237,8 +237,8 @@ func TestDeckArrowShortcuts(t *testing.T) {
 	}
 	tt.Type("verse")
 	tt.Key(0, ui.KeyRight)
-	if a.index != 0 {
-		t.Fatalf("the arrow in the search field moved the deck to %d", a.index)
+	if a.preview != 0 {
+		t.Fatalf("the arrow in the search field moved the monitor to %d", a.preview)
 	}
 }
 
@@ -266,7 +266,7 @@ func TestBlackoutButton(t *testing.T) {
 // An emptied deck shows its empty states instead of a blank panel.
 func TestEmptyDeckState(t *testing.T) {
 	a, tt := signedInApp(t)
-	a.deck, a.index = nil, 0
+	a.deck, a.preview, a.stage = nil, 0, 0
 	tt.Frame()
 
 	if !tt.HasText("Nothing on stage yet.") {

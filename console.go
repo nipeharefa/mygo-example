@@ -259,9 +259,9 @@ func (a *app) service(c *ui.Context) {
 				ui.Text(c, fmt.Sprintf("%d slides", len(a.deck))).FontSize(11).TextColor(t.TextMuted).SingleLine()
 			})
 			ui.Button(c, "Move up").Label("Move slide up").OnClick(func() { a.moveSlide(-1) }).
-				Disabled(len(a.deck) == 0 || a.index == 0)
+				Disabled(len(a.deck) == 0 || a.preview == 0)
 			ui.Button(c, "Move down").Label("Move slide down").OnClick(func() { a.moveSlide(1) }).
-				Disabled(len(a.deck) == 0 || a.index >= len(a.deck)-1)
+				Disabled(len(a.deck) == 0 || a.preview >= len(a.deck)-1)
 			ui.Button(c, "Remove").Label("Remove slide").OnClick(a.removeSlide).
 				Disabled(len(a.deck) == 0)
 		})
@@ -275,7 +275,7 @@ func (a *app) service(c *ui.Context) {
 		}
 		// The list keeps its own selection state; point it at the app's index
 		// and give each row a stable identity every pass.
-		a.deckList.Selected = &a.index
+		a.deckList.Selected = &a.preview
 		a.deckList.Key = func(i int) any { return a.deck[i].ID }
 		a.deckList.Label = func(i int) string {
 			return fmt.Sprintf("Slide %d: %s", i+1, a.deck[i].caption())
@@ -290,7 +290,7 @@ func (a *app) deckRow(c *ui.Context, i int) {
 	t := c.Theme()
 	s := a.deck[i]
 	bg := t.Background
-	if i == a.index {
+	if i == a.preview {
 		bg = t.SurfaceHover
 	}
 	ui.Row(c).Padding(9, 11).Gap(10).AlignItems(ui.Center).Radius(8).Background(bg).
@@ -344,7 +344,7 @@ func (a *app) stageCard(c *ui.Context) {
 	st := stageTheme()
 	ui.Column(c).WidthPercent(100).AspectRatio(16.0/9.0).Radius(10).
 		Background(st.Background).Border(1, st.Border).Padding(18).Justify(ui.Center).Children(func() {
-		s, ok := a.currentSlide()
+		s, ok := a.stageSlide()
 		if !ok {
 			ui.Text(c, "No slide").FontSize(12).TextColor(st.TextMuted).SingleLine()
 			return
@@ -359,5 +359,5 @@ func (a *app) stageCounter() string {
 	if len(a.deck) == 0 {
 		return "0 / 0"
 	}
-	return fmt.Sprintf("%d / %d", a.index+1, len(a.deck))
+	return fmt.Sprintf("%d / %d", a.stage+1, len(a.deck))
 }

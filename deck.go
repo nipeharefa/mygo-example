@@ -55,7 +55,8 @@ func (a *app) newSlide(s slide) slide {
 	return s
 }
 
-// addSong appends every section of the song and selects its first slide.
+// addSong appends every section of the song and moves the monitor to its
+// first slide. The stage is untouched until the operator takes it.
 func (a *app) addSong(id string) {
 	s, ok := songByID(id)
 	if !ok {
@@ -70,11 +71,11 @@ func (a *app) addSong(id string) {
 			Kind:    slideSong,
 		}))
 	}
-	a.index = first
+	a.preview = first
 	a.changed()
 }
 
-// addVerse appends one scripture slide and selects it.
+// addVerse appends one scripture slide and moves the monitor to it.
 func (a *app) addVerse(ref string) {
 	v, ok := verseByRef(ref)
 	if !ok {
@@ -86,52 +87,106 @@ func (a *app) addVerse(ref string) {
 		Text:    v.Text,
 		Kind:    slideVerse,
 	}))
-	a.index = len(a.deck) - 1
+	a.preview = len(a.deck) - 1
 	a.changed()
 }
 
+// selectSlide chooses the monitor row without touching the stage.
 func (a *app) selectSlide(i int) {
 	if i < 0 || i >= len(a.deck) {
 		return
 	}
-	a.index = i
+	a.preview = i
 	a.changed()
 }
 
-// nextSlide advances without wrapping past the last slide.
+// nextSlide advances the monitor without wrapping past the last slide.
 func (a *app) nextSlide() {
-	if a.index < len(a.deck)-1 {
-		a.index++
+	if a.preview < len(a.deck)-1 {
+		a.preview++
 		a.changed()
 	}
 }
 
-// prevSlide steps back without wrapping past the first slide.
+// prevSlide steps the monitor back without wrapping past the first slide.
 func (a *app) prevSlide() {
-	if a.index > 0 {
-		a.index--
+	if a.preview > 0 {
+		a.preview--
 		a.changed()
 	}
 }
 
-// removeSlide drops the selected slide and keeps the index on a real row.
-func (a *app) removeSlide() {
-	if len(a.deck) == 0 {
+// takeSlide sends the monitor row to the stage. It is the Go Live action.
+func (a *app) takeSlide() {
+	if a.preview < 0 || a.preview >= len(a.deck) || a.preview == a.stage {
 		return
 	}
-	a.deck = append(a.deck[:a.index], a.deck[a.index+1:]...)
-	a.clampIndex()
+	a.stage = a.preview
 	a.changed()
 }
 
-// moveSlide swaps the selected slide with its neighbour.
-func (a *app) moveSlide(delta int) {
-	target := a.index + delta
-	if target < 0 || target >= len(a.deck) {
+// nextStage advances the stage and pulls the monitor along, so the console
+// highlight keeps up with what the room sees.
+func (a *app) nextStage() {
+	if a.stage < len(a.deck)-1 {
+		a.stage++
+		a.preview = a.stage
+		a.changed()
+	}
+}
+
+// prevStage steps the stage back and pulls the monitor along.
+func (a *app) prevStage() {
+	if a.stage > 0 {
+		a.stage--
+		a.preview = a.stage
+		a.changed()
+	}
+}
+
+// removeSlide drops the monitor row and keeps both indices on real rows.
+// The row after the removed one stays on air when the removed row was live.
+func (a *app) removeSlide() {
+	r := a.preview
+	if len(a.deck) == 0 || r < 0 || r >= len(a.deck) {
 		return
 	}
-	a.deck[a.index], a.deck[target] = a.deck[target], a.deck[a.index]
-	a.index = target
+	s := a.stage
+	a.deck = append(a.deck[:r], a.deck[r+1:]...)
+	if len(a.deck) == 0 {
+		a.preview, a.stage = 0, 0
+		a.changed()
+		return
+	}
+	switch {
+	case s == r:
+		a.stage = clamp(r, 0, len(a.deck)-1)
+	case s > r:
+		a.stage = s - 1
+	}
+	a.preview = clamp(r, 0, len(a.deck)-1)
+	a.clampSlides()
+	a.changed()
+}
+
+// moveSlide swaps the monitor row with its neighbour. The slide on air stays
+// on air: the stage index follows the swap when it points at either row.
+func (a *app) moveSlide(delta int) {
+	p := a.preview
+	target := p + delta
+	if p < 0 || p >= len(a.deck) || target < 0 || target >= len(a.deck) {
+		return
+	}
+	s := a.stage
+	a.deck[p], a.deck[target] = a.deck[target], a.deck[p]
+	switch s {
+	case p:
+		a.stage = target
+	case target:
+		a.stage = p
+	}
+	a.preview = target
+	a.clampSlides()
 	a.changed()
 }
 
@@ -140,28 +195,39 @@ func (a *app) toggleBlackout() {
 	a.changed()
 }
 
-func (a *app) currentSlide() (slide, bool) {
-	if a.index < 0 || a.index >= len(a.deck) {
+// stageSlide is the slide the output window and NDI show.
+func (a *app) stageSlide() (slide, bool) {
+	if a.stage < 0 || a.stage >= len(a.deck) {
 		return slide{}, false
 	}
-	return a.deck[a.index], true
+	return a.deck[a.stage], true
 }
 
+// previewSlide is the slide the console monitor shows.
+func (a *app) previewSlide() (slide, bool) {
+	if a.preview < 0 || a.preview >= len(a.deck) {
+		return slide{}, false
+	}
+	return a.deck[a.preview], true
+}
+
+// upcomingSlide is the slide after the one on air, for the "Next up" line.
 func (a *app) upcomingSlide() (slide, bool) {
-	next := a.index + 1
+	next := a.stage + 1
 	if next < 0 || next >= len(a.deck) {
 		return slide{}, false
 	}
 	return a.deck[next], true
 }
 
-// clampIndex keeps the selection inside the deck after removals.
-func (a *app) clampIndex() {
+// clampSlides keeps both indices inside the deck after removals.
+func (a *app) clampSlides() {
 	if len(a.deck) == 0 {
-		a.index = 0
+		a.preview, a.stage = 0, 0
 		return
 	}
-	a.index = clamp(a.index, 0, len(a.deck)-1)
+	a.preview = clamp(a.preview, 0, len(a.deck)-1)
+	a.stage = clamp(a.stage, 0, len(a.deck)-1)
 }
 
 func clamp(v, lo, hi int) int {

@@ -21,7 +21,7 @@ func (a *app) liveView(c *ui.Context) {
 		ui.Column(c).Fill().Background(ui.Hex(stageBackgroundHex)).DragWindow()
 	} else {
 		ui.Column(c).Fill().Background(t.Background).Padding(56, 72).Justify(ui.Center).AlignItems(ui.Center).DragWindow().Children(func() {
-			s, ok := a.currentSlide()
+			s, ok := a.stageSlide()
 			if !ok {
 				ui.Text(c, "Nothing on stage").FontSize(24).TextColor(t.TextMuted)
 				return
@@ -32,11 +32,11 @@ func (a *app) liveView(c *ui.Context) {
 		})
 	}
 
-	c.OnShortcut(0, ui.KeyRight, a.nextSlide)
-	c.OnShortcut(0, ui.KeyDown, a.nextSlide)
-	c.OnShortcut(0, ui.KeySpace, a.nextSlide)
-	c.OnShortcut(0, ui.KeyLeft, a.prevSlide)
-	c.OnShortcut(0, ui.KeyUp, a.prevSlide)
+	c.OnShortcut(0, ui.KeyRight, a.nextStage)
+	c.OnShortcut(0, ui.KeyDown, a.nextStage)
+	c.OnShortcut(0, ui.KeySpace, a.nextStage)
+	c.OnShortcut(0, ui.KeyLeft, a.prevStage)
+	c.OnShortcut(0, ui.KeyUp, a.prevStage)
 	c.OnShortcut(0, ui.KeyB, a.toggleBlackout)
 	c.OnShortcut(0, ui.KeyEscape, func() {
 		switch {

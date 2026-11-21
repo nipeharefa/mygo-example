@@ -42,7 +42,8 @@ type app struct {
 	pack       string
 
 	deck     []slide
-	index    int
+	preview  int // the row selected in the monitor
+	stage    int // the row on air
 	blackout bool
 	nextID   int
 	deckList ui.ListState
@@ -61,7 +62,7 @@ func newApp() *app {
 	a := &app{pack: packs[0].Name}
 	a.addSong("amazing-grace")
 	a.addVerse("Psalm 23:1")
-	a.index = 0
+	a.preview, a.stage = 0, 0
 	return a
 }
 
@@ -75,7 +76,7 @@ func (a *app) signIn() {
 	a.authErr = ""
 	a.password = ""
 	a.signedIn = true
-	a.index = 0
+	a.preview, a.stage = 0, 0
 }
 
 // signOut returns to the login card and drops everything that belonged to
@@ -87,7 +88,7 @@ func (a *app) signOut() {
 	a.password = ""
 	a.authErr = ""
 	a.blackout = false
-	a.index = 0
+	a.preview, a.stage = 0, 0
 }
 
 // clearAuthError hides a stale error as soon as either field changes.
