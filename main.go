@@ -96,6 +96,8 @@ func (a *app) signIn() {
 func (a *app) signOut() {
 	a.closeOutput()
 	a.stopNDI()
+	a.closeSettings()
+	a.closeHelp()
 	a.signedIn = false
 	a.password = ""
 	a.authErr = ""

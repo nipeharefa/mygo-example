@@ -2,16 +2,17 @@
 
 `mygo-demo` is a demo desktop app: a small worship presenter for a church
 screen. It keeps a run of show of public-domain hymns and King James
-verses, shows one slide on a separate output window, and can publish that
-window as an NDI source on macOS, Windows and Linux. The Go side is the
-whole app: package `main` builds two native windows with
+verses, previews the next slide on a monitor and sends one slide to a
+separate stage window, and can publish that stage as an NDI source on
+macOS, Windows and Linux. The Go side is the whole app: package `main`
+builds the console plus on-demand stage, Settings and Help windows with
 `github.com/egoist/mygo/ui`, and there is no network access, no database,
 and no web page in use.
 
 The sign-in is a demo gate, not security: the account is the
 `demoUsername`/`demoPassword` pair in `main.go`, `signedIn` lives on
-`app`, and nothing survives the process. There is no persistence at all:
-closing the app loses the run of show.
+`app`, and nothing lasts beyond the process except the display and NDI
+preferences, which are a small JSON file in the app data directory.
 
 **Read [docs/architecture.md](docs/architecture.md) before changing the
 view.** It describes the state model, the two windows, the frame contract,
@@ -31,11 +32,12 @@ identity rules live in
   `stageBackgroundHex` for the output window's background. Everything else
   reads `c.Theme()`, so light and dark appearance and the system accent and
   text-scale preferences keep working.
-- **Mutate state from callbacks, then redraw both windows.** Every deck
-  method ends with `a.changed()`, which invalidates `a.win` and `a.live`.
-  Call it from `OnClick`/`OnSubmit`/`OnChange`/shortcut callbacks, never
-  from inside the build pass.
-- **The live window is the output, and NDI publishes only it.** The
+- **Mutate state from callbacks, then redraw every window.** Every state
+  method ends with `a.changed()`, which invalidates `a.win`, `a.live`,
+  `a.settings` and `a.help` (each nil-safe). Call it from
+  `OnClick`/`OnSubmit`/`OnChange`/shortcut/menu callbacks, never from
+  inside the build pass.
+- **The stage is the output, and NDI publishes only it.** The
   window is `Frameless`, so the slide fills it and the capture carries no
   window chrome; the slide columns are `DragWindow()` handles so a
   windowed output can still be moved. `a.live`
@@ -44,6 +46,12 @@ identity rules live in
   fails with `NDI output needs the live window` when `a.live == nil`; it
   never falls back to the console window. Start, present and stop NDI from
   main-thread callbacks only.
+- **The monitor never reaches the room by itself.**
+  `selectSlide`/`nextSlide`/`prevSlide` move `a.preview`; only
+  `takeSlide` (Go Live, Enter on the list, Cmd/Ctrl+Enter) and the stage
+  window's own next/prev move `a.stage`. `nextStage`/`prevStage` pull the
+  monitor along so the highlight follows the room. Do not wire a console
+  control straight to `a.stage`.
 - **Keep the song and scripture text public domain.** `data.go` holds the
   5 traditional hymns and the 4 KJV verse packs; the KJV (1611) and those
   hymn texts are public domain. Do not paste in copyrighted lyrics or a
@@ -61,6 +69,18 @@ identity rules live in
   `main.go`; no session, no hashing, no network. Sign-in and sign-out
   mutate `app` from callbacks, never from inside the build pass. Sign-out
   closes the output and stops NDI.
+- **Windows come from main-thread callbacks, and tests never open one.**
+  `mygo.NewWindow` is called by `openOutput`, `openSettings` and `openHelp`
+  from `OnClick`/`OnSubmit`/menu callbacks after `WhenReady`; never from
+  the build pass and never from a test, because a headless `ui.Tester` has
+  no application. Settings/Help reuse the existing window instead of
+  opening a second one. `buildMenu` is headless-safe and its structure is
+  tested; its click callbacks are not.
+- **Settings persistence is the only persistence.**
+  `settings.go` reads and writes `settings.json` (display ID, NDI on/off)
+  in `mygo.App.Path(mygo.PathUserData)`. `a.settingsDir` is empty until
+  `WhenReady` and in tests, and `saveSettings` then does nothing. The run
+  of show is session-only; do not persist it unasked.
 - **Do not edit `src/mygo.ts` by hand.** It is `mygo generate` output, and
   the web frontend is currently unused (see "Known state").
 - **NDI output stays pure Go, and the binding lives in one file.**
@@ -121,15 +141,20 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 
 | Path | What |
 | --- | --- |
-| `main.go` | The app: `app` state, the demo account, sign-in/out, `changed`, the NDI toggle, and `main()` (console window, `MYGO_NDI`, `OnQuit`). |
+| `main.go` | The app: `app` state, the demo account, sign-in/out, `changed`, `setNDI`/`toggleNDI`/`ndiLabel`, `main()` startup order (app data dir, displays, `loadSettings`, menu, console window, `MYGO_NDI`, `OnQuit`), and the `stageSourceName` constant. |
 | `data.go` | The library: 5 public-domain hymns (10 sections) and 4 KJV verse packs (16 verses), plus `songByID`/`verseByRef`. No data here is fetched or stored. |
-| `deck.go` | The run-of-show model: `slide`, `slideKind`, add/select/next/prev/remove/move/blackout, `currentSlide`/`upcomingSlide`, `clampIndex`. |
-| `console.go` | The console view: top bar, library (Songs/Bible tabs, search, pack picker), run of show list, stage panel, and the login card. |
-| `output.go` | The live window: `liveView`, `openOutput`/`closeOutput`/`togglePresent`, and `secondDisplay` for fullscreen on a projector. |
+| `deck.go` | The run-of-show model: `slide`, `slideKind`, add/select/next/prev (monitor), `takeSlide`, `nextStage`/`prevStage`, remove/move/blackout, `stageSlide`/`previewSlide`/`upcomingSlide`, `clampSlides`. |
+| `console.go` | The console view: top bar, library (Songs/Bible tabs, search, pack picker), run of show list with the LIVE badge, the two-card stage/monitor panel with Go Live, and the login card. |
+| `output.go` | The stage window: `liveView`, stage shortcuts, `openOutput`/`closeOutput`/`togglePresent`, and `chooseDisplay` for fullscreen placement. |
 | `theme.go` | The only file with literal colors: warm console theme (light/dark) and the forced-dark stage theme. |
-| `view_test.go` | Headless console tests: login gate, library, add/search, arrow shortcuts, blackout, empty deck, sign out. |
+| `menu.go` | `buildMenu` (app, edit, Settings, Help menus) and `showAbout`. |
+| `settings.go` | The Settings window, display radios, NDI switch and status line, `settings.json` read/write, `loadSettings`/`saveSettings`, `refreshDisplays`. |
+| `help.go` | The Help window: about, keyboard table, NDI notes, sample-data notes. |
+| `view_test.go` | Headless console tests: login gate, library, add/search, monitor vs stage (click, Go Live, Enter, Cmd+Enter), arrows, blackout, empty deck, sign out. |
+| `menu_test.go` | Headless menu structure: item IDs, accelerator, click handlers present (clicks not run). |
+| `settings_test.go` | Settings round-trip, missing/corrupt defaults, `chooseDisplay`, settings/help view rendering, display refresh. |
 | `deck_test.go` | Headless model tests: data reachability, ids, clamping, reorder, blackout, `changed()` without windows. |
-| `output_test.go` | Headless output tests: current slide, follow next, blackout hides text, output shortcuts, NDI refuses without the live window. |
+| `output_test.go` | Headless stage tests: the stage slide (not the monitor), next/prev move both, blackout hides text, stage shortcuts, NDI waits for the stage or clears the preference. |
 | `ndi_sender.go` | The NDI half every platform shares: candidate walk, versioned-table binding with a named-export fallback, `startNDISender`, the frame loop, `Stop`. |
 | `ndi_sender_test.go` | Proves the table indices (0/8/9/50) match the functions a real installed runtime also exports by name; skips without NDI. |
 | `ndi_darwin.go` | `purego` dlopen/dlsym plus `CGWindowListCreateImage` capture of the frameless live window at the display's pixel density, capped to 1920×1080 by `ndiFrameSize`, on screen only. |
@@ -142,14 +167,15 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `src/`, `index.html`, `vite.config.ts` | Leftover web template; nothing renders it. |
 | `.github/workflows/ci.yml` | The test gate, a native Windows run that launches the binary, the macOS/Windows/Linux packaging matrix, and a release job on `v*` tags. |
 | `docs/architecture.md` | How the app works; read this next. |
-| `docs/superpowers/plans/` | Historical plans, including the 0.2.0 worship-presenter plan. |
+| `docs/superpowers/plans/` | Historical plans: the 0.2.0 worship presenter and the monitor/Settings beta. |
 
 ## Known state, deliberately untouched
 
 The web scaffold (`src/`, `index.html`, `vite.config.ts`, the `devUrl` and
 frontend settings in `mygo.config.ts`) and the `tick` event in
 `src/mygo.ts` predate the native UI and are unused. `dist/` is still built
-and embedded, but no window loads it. There is no persistence, no
-undo/redo, and no media beyond text. These are recorded in
+and embedded, but no window loads it. The run of show is not persisted,
+there is no undo/redo, and no media beyond text; only the display and NDI
+preferences survive a restart. These are recorded in
 `docs/architecture.md` under "Known drift and gaps"; do not clean them up
 unasked.
