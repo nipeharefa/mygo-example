@@ -146,6 +146,17 @@ func TestSetNDIWaitsForTheStage(t *testing.T) {
 	}
 }
 
+// Review Focus 4: signing out leaves no sender behind.
+func TestSignOutStopsNDI(t *testing.T) {
+	a := newApp()
+	a.ndiOn = true
+	a.signedIn = true
+	a.signOut()
+	if a.ndi != nil {
+		t.Fatal("NDI still set after sign-out")
+	}
+}
+
 func TestSetNDIOffClearsThePreference(t *testing.T) {
 	a := &app{ndiOn: true, ndiErr: "old error"}
 	a.setNDI(false)

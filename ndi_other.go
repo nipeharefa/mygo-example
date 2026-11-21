@@ -5,8 +5,6 @@ package main
 import (
 	"errors"
 	"time"
-
-	"github.com/egoist/mygo"
 )
 
 // ndiSupported reports whether this build can publish the stage; the three
