@@ -215,6 +215,73 @@ type ndiStream struct {
 	stop chan struct{}
 	done chan struct{}
 	once sync.Once
+
+	mu        sync.Mutex
+	frames    int64 // frames handed to the sender
+	dropped   int64 // capture attempts that had nothing to send
+	width     int   // the last frame's size, which is what the feed sends
+	height    int
+	first     time.Time // when the first frame went out; zero until then
+	lastFrame time.Time // when the last frame went out
+	lastErr   string
+}
+
+// ndiStats is what the Settings page reports about the stream. NDI 5 and 6
+// have no receiver tally, so these are the sender's own numbers.
+type ndiStats struct {
+	Frames, Dropped int64
+	Width, Height   int
+	FPS             float64 // measured since the first frame
+	Uptime          time.Duration
+	Err             string
+}
+
+// snapshot reads the counters for a view. The frame rate is measured, not
+// taken from the frame header, so a stalled capture shows a falling rate.
+func (s *ndiStream) snapshot() ndiStats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := ndiStats{
+		Frames:  s.frames,
+		Dropped: s.dropped,
+		Width:   s.width,
+		Height:  s.height,
+		Uptime:  time.Since(s.first),
+		Err:     s.lastErr,
+	}
+	if s.frames > 0 {
+		if secs := s.lastFrame.Sub(s.first).Seconds(); secs >= time.Second.Seconds() {
+			st.FPS = float64(s.frames-1) / secs
+		}
+	}
+	return st
+}
+
+// sent records one frame on its way to the consumer.
+func (s *ndiStream) sent(w, h int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	if s.first.IsZero() {
+		s.first = now
+	}
+	s.lastFrame = now
+	s.frames++
+	s.width, s.height = w, h
+}
+
+// skipped records a capture that found nothing to send.
+func (s *ndiStream) skipped() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dropped++
+}
+
+// failed records the last error the loop ran into.
+func (s *ndiStream) failed(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastErr = err.Error()
 }
 
 // startNDISender opens the NDI runtime and starts sending frames of win. It
@@ -270,6 +337,7 @@ func (s *ndiStream) run() {
 		}
 		shot, ok := captureFrame(s.capt)
 		if !ok {
+			s.skipped()
 			// Nothing to show right now (the window is minimized, hidden,
 			// or on a screen reader that refuses); the consumer keeps the
 			// last frame.
@@ -285,6 +353,7 @@ func (s *ndiStream) run() {
 		frame.data = &shot.pix[0]
 		frame.lineStride = int32(shot.stride)
 		s.rt.sendVideo(s.send, &frame)
+		s.sent(int(frame.xres), int(frame.yres))
 	}
 }
 

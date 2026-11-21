@@ -11,7 +11,7 @@ import (
 
 func TestSettingsRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	want := settings{OutputDisplay: 42, NDI: true}
+	want := settings{Display: 42, NDI: true}
 	if err := writeSettings(path, want); err != nil {
 		t.Fatalf("writeSettings: %v", err)
 	}
@@ -37,40 +37,59 @@ func TestReadSettingsCorruptFile(t *testing.T) {
 	}
 }
 
+// The file written before the display key existed is still read: its
+// outputDisplay names the display, and 0 meant "automatic".
+func TestReadSettingsLegacyDisplay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte("{\"outputDisplay\": 2, \"ndi\": true}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readSettings(path); got != (settings{Display: 2, NDI: true}) {
+		t.Fatalf("readSettings = %+v, want Display 2 and NDI", got)
+	}
+
+	if err := os.WriteFile(path, []byte("{\"outputDisplay\": 0, \"ndi\": false}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readSettings(path); got != (settings{}) {
+		t.Fatalf("readSettings = %+v, want windowed", got)
+	}
+}
+
 // The app saves and loads through its settings directory, and never writes
 // when there is none.
 func TestAppSaveLoadSettings(t *testing.T) {
 	a := &app{settingsDir: t.TempDir()}
-	a.outputDisplay = 7
+	a.stageDisplay = 7
 	a.ndiOn = true
 	a.saveSettings()
 
 	b := &app{settingsDir: a.settingsDir}
 	b.loadSettings()
-	if b.outputDisplay != 7 || !b.ndiOn {
-		t.Fatalf("loaded outputDisplay = %d ndiOn = %v, want 7/true", b.outputDisplay, b.ndiOn)
+	if b.stageDisplay != 7 || !b.ndiOn {
+		t.Fatalf("loaded stageDisplay = %d ndiOn = %v, want 7/true", b.stageDisplay, b.ndiOn)
 	}
 }
 
 func TestSaveSettingsWithoutADirectory(t *testing.T) {
 	a := &app{}
-	a.outputDisplay = 7
+	a.stageDisplay = 7
 	a.ndiOn = true
 	a.saveSettings() // must not panic or touch the real app data dir
 }
 
-// A saved display that is no longer attached falls back to automatic.
+// A saved display that is no longer attached falls back to a window.
 func TestLoadSettingsDropsMissingDisplay(t *testing.T) {
 	a := &app{
 		settingsDir: t.TempDir(),
 		displays:    []mygo.Display{{ID: 1, Label: "Built-in", Primary: true}},
 	}
-	if err := writeSettings(a.settingsPath(), settings{OutputDisplay: 99, NDI: true}); err != nil {
+	if err := writeSettings(a.settingsPath(), settings{Display: 99, NDI: true}); err != nil {
 		t.Fatal(err)
 	}
 	a.loadSettings()
-	if a.outputDisplay != 0 {
-		t.Fatalf("outputDisplay = %d, want automatic", a.outputDisplay)
+	if a.stageDisplay != 0 {
+		t.Fatalf("stageDisplay = %d, want windowed", a.stageDisplay)
 	}
 	if !a.ndiOn {
 		t.Fatal("the NDI preference was dropped with the display")
@@ -82,12 +101,12 @@ func TestLoadSettingsKeepsAttachedDisplay(t *testing.T) {
 		settingsDir: t.TempDir(),
 		displays:    []mygo.Display{{ID: 1, Primary: true}, {ID: 2, Label: "Projector"}},
 	}
-	if err := writeSettings(a.settingsPath(), settings{OutputDisplay: 2}); err != nil {
+	if err := writeSettings(a.settingsPath(), settings{Display: 2}); err != nil {
 		t.Fatal(err)
 	}
 	a.loadSettings()
-	if a.outputDisplay != 2 {
-		t.Fatalf("outputDisplay = %d, want 2", a.outputDisplay)
+	if a.stageDisplay != 2 {
+		t.Fatalf("stageDisplay = %d, want 2", a.stageDisplay)
 	}
 }
 
@@ -108,62 +127,75 @@ func TestDisplayName(t *testing.T) {
 	}
 }
 
-// chooseDisplay is where the stage opens: an explicit display, otherwise the
-// first projector, otherwise a plain window.
-func TestChooseDisplay(t *testing.T) {
-	primary := mygo.Display{ID: 1, Label: "Built-in", Primary: true}
-	projector := mygo.Display{ID: 2, Label: "Projector"}
-	displays := []mygo.Display{primary, projector}
+// stageDisplayFound is where the stage opens fullscreen: only a display the
+// operator picked, and only while it is attached.
+func TestStageDisplayFound(t *testing.T) {
+	displays := []mygo.Display{
+		{ID: 1, Label: "Built-in", Primary: true},
+		{ID: 2, Label: "Projector"},
+	}
 
-	if d, ok := chooseDisplay(displays, 2); !ok || d.ID != 2 {
-		t.Fatalf("explicit display = %+v ok = %v", d, ok)
+	if d, ok := stageDisplayFound(displays, 2); !ok || d.ID != 2 {
+		t.Fatalf("picked display = %+v ok = %v", d, ok)
 	}
-	if _, ok := chooseDisplay(displays, 99); ok {
-		t.Fatal("a missing explicit display was returned")
+	if _, ok := stageDisplayFound(displays, 99); ok {
+		t.Fatal("a missing display was returned")
 	}
-	if d, ok := chooseDisplay(displays, 0); !ok || d.ID != 2 {
-		t.Fatalf("automatic display = %+v ok = %v", d, ok)
+	if _, ok := stageDisplayFound(displays, 0); ok {
+		t.Fatal("windowed was placed on a display")
 	}
-	if _, ok := chooseDisplay([]mygo.Display{primary}, 0); ok {
-		t.Fatal("automatic picked the primary display")
-	}
-	if _, ok := chooseDisplay(nil, 0); ok {
-		t.Fatal("automatic picked a display from an empty list")
+	if _, ok := stageDisplayFound(nil, 0); ok {
+		t.Fatal("windowed was placed on an empty list")
 	}
 }
 
-func TestSettingsViewListsDisplays(t *testing.T) {
+func TestSettingsPageListsDisplays(t *testing.T) {
 	a := &app{displays: []mygo.Display{
 		{ID: 1, Label: "Built-in", Primary: true, Bounds: mygo.Rectangle{Width: 1440, Height: 900}},
 		{ID: 2, Label: "Projector", Bounds: mygo.Rectangle{Width: 1920, Height: 1080}},
 	}}
-	tt := ui.NewTester(a.settingsView, 560, 520)
-	for _, want := range []string{"Settings", "Stage output", "Automatic", "Built-in", "Projector", "Publish the stage over NDI", "Data"} {
+	tt := ui.NewTester(a.settingsBody, 900, 800)
+	for _, want := range []string{"Stage output", "Windowed on this screen", "Built-in", "Projector", "Publish the stage over NDI", "NDI stream", "Data"} {
 		if !tt.HasText(want) {
 			t.Fatalf("settings is missing %q: %q", want, tt.Texts())
 		}
 	}
+	if tt.HasText("Automatic") {
+		t.Fatal("settings still offers Automatic")
+	}
 }
 
-func TestSettingsViewWithoutDisplays(t *testing.T) {
+func TestSettingsPageWithoutDisplays(t *testing.T) {
 	a := &app{}
-	tt := ui.NewTester(a.settingsView, 560, 520)
+	tt := ui.NewTester(a.settingsBody, 900, 800)
 	if !tt.HasText("No displays reported.") {
 		t.Fatalf("settings does not explain the empty display list: %q", tt.Texts())
 	}
 }
 
 // Choosing a display with no stage open saves and redraws, without windows.
-func TestOutputDisplayChangedWithoutAStage(t *testing.T) {
-	a := &app{}
-	a.outputDisplay = 2
-	a.outputDisplayChanged()
+func TestStageDisplayChangedWithoutAStage(t *testing.T) {
+	a := newApp()
+	a.stageDisplayChanged()
+}
+
+// A display change that does not touch the stage's display leaves the
+// settings alone: nothing here closes and reopens the stage.
+func TestDisplayChangeKeepsTheStagePreference(t *testing.T) {
+	a := &app{stageDisplay: 2, stageDisplayUsed: 2}
+	a.refreshDisplays([]mygo.Display{{ID: 1, Primary: true}, {ID: 2, Label: "Projector"}, {ID: 3, Label: "TV"}})
+	if a.stageDisplay != 2 {
+		t.Fatalf("stageDisplay = %d, want the unchanged 2", a.stageDisplay)
+	}
+	if a.stageDisplayUsed != 2 {
+		t.Fatalf("stageDisplayUsed = %d, want 2", a.stageDisplayUsed)
+	}
 }
 
 func TestRefreshDisplaysWithoutAStage(t *testing.T) {
-	a := &app{outputDisplay: 2}
+	a := &app{stageDisplay: 2}
 	a.refreshDisplays([]mygo.Display{{ID: 1, Primary: true}})
-	if a.outputDisplay != 0 {
-		t.Fatalf("outputDisplay = %d, want automatic after the display vanished", a.outputDisplay)
+	if a.stageDisplay != 0 {
+		t.Fatalf("stageDisplay = %d, want windowed after the display vanished", a.stageDisplay)
 	}
 }

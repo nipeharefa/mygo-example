@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -56,13 +57,27 @@ type app struct {
 	win  *mygo.Window
 	live *mygo.Window
 
-	settings      *mygo.Window
-	help          *mygo.Window
-	settingsDir   string         // app data dir; empty keeps tests headless
-	outputDisplay int64          // 0 = automatic
-	ndiOn         bool           // publish the stage when it opens
-	displays      []mygo.Display // refreshed at startup and on display changes
-	version       string         // mygo.App.Version(); empty under go run
+	// Seams, so the window and screen calls the tests cannot make stay in
+	// one place and the logic around them runs headless.
+	newWindow  func(mygo.WindowOptions) *mygo.Window
+	mainScreen func() []mygo.Display
+
+	help        *mygo.Window
+	settingsDir string // app data dir; empty keeps tests headless
+	version     string // mygo.App.Version(); empty under go run
+
+	// The stage: where it opens, where the open window went, and whether
+	// NDI publishes it.
+	stageDisplay     int64          // 0 = windowed on the console's screen
+	stageDisplayUsed int64          // display the open stage was placed on
+	ndiOn            bool           // publish the stage when it opens
+	displays         []mygo.Display // refreshed at startup and on display changes
+
+	// Preferences page. statsWanted is the view's request for a stats
+	// timer; statsOn says this frame wanted one.
+	page        int
+	openStage   bool // the frame asked for the stage window
+	statsWanted bool // this frame wanted the stats timer
 
 	ndi    *ndiStream
 	ndiErr string
@@ -71,7 +86,7 @@ type app struct {
 // newApp builds the console with a small seed set list so a fresh install
 // has something on stage.
 func newApp() *app {
-	a := &app{pack: packs[0].Name}
+	a := &app{pack: packs[0].Name, newWindow: mygo.NewWindow, mainScreen: mygo.Screen.Displays}
 	a.addSong("amazing-grace")
 	a.addVerse("Psalm 23:1")
 	a.preview, a.stage = 0, 0
@@ -96,8 +111,8 @@ func (a *app) signIn() {
 func (a *app) signOut() {
 	a.closeOutput()
 	a.stopNDI()
-	a.closeSettings()
 	a.closeHelp()
+	a.page = pageConsole
 	a.signedIn = false
 	a.password = ""
 	a.authErr = ""
@@ -120,12 +135,41 @@ func (a *app) changed() {
 	if a.live != nil {
 		a.live.Invalidate()
 	}
-	if a.settings != nil {
-		a.settings.Invalidate()
-	}
 	if a.help != nil {
 		a.help.Invalidate()
 	}
+}
+
+// requestStage opens the stage from the next frame: a window has to come
+// from a callback, not from the build pass, and the button may be built
+// before the console window exists (a headless test never has one).
+func (a *app) requestStage() {
+	a.openStage = true
+	a.changed()
+}
+
+// settle applies what the frame asked for, once it has been built.
+func (a *app) settle() {
+	if a.openStage {
+		a.openStage = false
+		if a.win != nil {
+			a.openOutput()
+		}
+	}
+}
+
+// tickStats keeps the NDI numbers on the Settings page current with one
+// timer on the main loop. It runs only while that page is on screen.
+func (a *app) tickStats() {
+	if !a.statsWanted {
+		return
+	}
+	time.AfterFunc(statsInterval, func() {
+		if a.statsWanted {
+			a.win.Invalidate()
+		}
+		a.tickStats()
+	})
 }
 
 // startNDI publishes the live window as an NDI source. There is nothing to
@@ -174,17 +218,27 @@ func (a *app) ndiLabel() string {
 	return "Start NDI"
 }
 
+// page is the console's page switch.
+const (
+	pageConsole = iota
+	pageSettings
+)
+
+// statsInterval is how often a visible NDI stats table is refreshed.
+const statsInterval = time.Second
+
 func main() {
 	a := newApp()
 	mygo.App.WhenReady(func() {
 		// Order matters: the display list is needed to normalize the saved
-		// preference, and the menu is built from the version.
+		// preference, and the menu is built from the version. The list itself
+		// is fetched once a window exists: the platform's screen call is not
+		// safe before that.
 		if dir, err := mygo.App.Path(mygo.PathUserData); err == nil {
 			a.settingsDir = dir
 		} else {
 			log.Printf("mygo-demo: no app data directory: %v", err)
 		}
-		a.displays = mygo.Screen.Displays()
 		a.loadSettings()
 		if os.Getenv("MYGO_NDI") != "" {
 			// Session-only override: publish without rewriting the preference.
@@ -193,7 +247,7 @@ func main() {
 		a.version = mygo.App.Version()
 		mygo.App.SetMenu(buildMenu(a))
 		mygo.Screen.OnDisplaysChanged(a.displaysChanged)
-		a.win = mygo.NewWindow(mygo.WindowOptions{
+		a.win = a.newWindow(mygo.WindowOptions{
 			Title:     appTitle,
 			Width:     consoleWidth,
 			Height:    consoleHeight,
@@ -202,6 +256,8 @@ func main() {
 			StateKey:  "main",
 			Content:   ui.View(a.view),
 		})
+		a.displaysChanged()
+		a.tickStats()
 	})
 	mygo.App.OnQuit(a.stopNDI)
 	if err := mygo.App.Run(); err != nil {

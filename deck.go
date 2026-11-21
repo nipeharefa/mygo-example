@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -170,24 +171,103 @@ func (a *app) removeSlide() {
 }
 
 // moveSlide swaps the monitor row with its neighbour. The slide on air stays
-// on air: the stage index follows the swap when it points at either row.
+// on air: the reorder carries the stage along with the row it moves.
 func (a *app) moveSlide(delta int) {
-	p := a.preview
-	target := p + delta
-	if p < 0 || p >= len(a.deck) || target < 0 || target >= len(a.deck) {
+	p := a.preview + delta
+	if a.preview < 0 || a.preview >= len(a.deck) || p < 0 || p >= len(a.deck) {
 		return
 	}
-	s := a.stage
-	a.deck[p], a.deck[target] = a.deck[target], a.deck[p]
-	switch s {
-	case p:
-		a.stage = target
-	case target:
-		a.stage = p
+	a.reorderSlides([]int{a.preview}, p)
+}
+
+// reorderSlides moves the rows chosen to before the row that is at to now,
+// len(deck) meaning the end of the deck. The moved rows keep their order, the
+// slide on air stays on air wherever its row lands, and the monitor follows
+// the first moved row. The list calls it with the gap a dropped row lands in;
+// Move up/down calls it with the row it lands on, so both paths agree.
+func (a *app) reorderSlides(rows []int, to int) {
+	n := len(a.deck)
+	moved := normalizeRows(rows, n)
+	if len(moved) == 0 {
+		return
 	}
-	a.preview = target
+	if len(moved) == 1 && to == moved[0] {
+		// A row dropped onto its own gap stays put.
+		return
+	}
+	if to < 0 {
+		to = 0
+	}
+	if to > n {
+		to = n
+	}
+	onAir, hasAir := a.stageSlide()
+	// to is the gap the rows land in, counted in the deck without them
+	// (len(deck) means the end), so it needs no adjustment.
+	at := clamp(to, 0, n-len(moved))
+	rest := make([]slide, 0, n-len(moved))
+	block := make([]slide, 0, len(moved))
+	for i, s := range a.deck {
+		if containsRow(moved, i) {
+			block = append(block, s)
+		} else {
+			rest = append(rest, s)
+		}
+	}
+	at = clamp(at, 0, len(rest))
+	deck := make([]slide, 0, n)
+	deck = append(deck, rest[:at]...)
+	deck = append(deck, block...)
+	deck = append(deck, rest[at:]...)
+	a.deck = deck
+	a.stage = 0
+	if hasAir {
+		if i := deckIndex(deck, onAir.ID); i >= 0 {
+			a.stage = i
+		}
+	}
+	a.preview = clamp(at, 0, len(deck)-1)
 	a.clampSlides()
 	a.changed()
+}
+
+// containsRow reports whether row is one of the sorted rows.
+func containsRow(rows []int, row int) bool {
+	for _, r := range rows {
+		if r == row {
+			return true
+		}
+	}
+	return false
+}
+
+// deckIndex is the row holding a slide id, or -1.
+func deckIndex(deck []slide, id string) int {
+	for i, s := range deck {
+		if s.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// normalizeRows sorts and dedupes row numbers that name a row of n.
+func normalizeRows(rows []int, n int) []int {
+	out := make([]int, 0, len(rows))
+	for _, r := range rows {
+		if r < 0 || r >= n {
+			continue
+		}
+		out = append(out, r)
+	}
+	sort.Ints(out)
+	dedup := out[:0]
+	for i, r := range out {
+		if i == 0 || out[i-1] != r {
+			dedup = append(dedup, r)
+		}
+	}
+	return dedup
 }
 
 func (a *app) toggleBlackout() {

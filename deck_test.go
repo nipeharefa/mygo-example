@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestDataIsReachable(t *testing.T) {
 	if len(songs) < 4 {
@@ -415,4 +418,129 @@ func TestToggleBlackout(t *testing.T) {
 func TestChangedWithoutWindows(t *testing.T) {
 	a := &app{}
 	a.changed()
+}
+
+// seededApp returns the app's seed deck for the reorder tests.
+func seededApp() *app {
+	return newApp()
+}
+
+func deckIDs(a *app) []string {
+	ids := make([]string, len(a.deck))
+	for i, s := range a.deck {
+		ids[i] = s.ID
+	}
+	return ids
+}
+
+func TestNormalizeRows(t *testing.T) {
+	cases := []struct {
+		rows []int
+		n    int
+		want []int
+	}{
+		{[]int{2, 0}, 5, []int{0, 2}},
+		{[]int{1, 1}, 3, []int{1}},
+		{[]int{-1, 9}, 3, nil},
+		{nil, 3, nil},
+	}
+	for _, c := range cases {
+		got := normalizeRows(c.rows, c.n)
+		if fmt.Sprint(got) != fmt.Sprint(c.want) {
+			t.Fatalf("normalizeRows(%v, %d) = %v, want %v", c.rows, c.n, got, c.want)
+		}
+	}
+}
+
+// Dragging the first slide to the end leaves the same slide on air.
+func TestReorderMovesSlidesAndKeepsTheStage(t *testing.T) {
+	a := seededApp()
+	a.stage, a.preview = 0, 0
+	onAir := a.deck[0].ID
+	want := deckIDs(a)
+
+	a.reorderSlides([]int{0}, len(a.deck))
+
+	if a.deck[len(a.deck)-1].ID != onAir {
+		t.Fatalf("the dragged slide landed at %v", deckIDs(a))
+	}
+	if got := a.deck[a.stage].ID; got != onAir {
+		t.Fatalf("stage shows %s, want the same slide %s", got, onAir)
+	}
+	if a.preview != len(a.deck)-1 {
+		t.Fatalf("preview = %d, want the dragged row at the end", a.preview)
+	}
+	// Every slide survives, only the order changed.
+	if len(deckIDs(a)) != len(want) {
+		t.Fatalf("deck lost a slide: %v", deckIDs(a))
+	}
+}
+
+// Dragging a later row upwards, over the row on air, keeps that row on air.
+func TestReorderOverTheStageKeepsItOnAir(t *testing.T) {
+	a := seededApp()
+	a.addVerse("Psalm 23:2")
+	a.stage, a.preview = 1, len(a.deck)-1
+	onAir := a.deck[1].ID
+	moved := a.deck[len(a.deck)-1].ID
+
+	a.reorderSlides([]int{len(a.deck) - 1}, 0)
+
+	if a.deck[0].ID != moved {
+		t.Fatalf("deck = %v, want %s first", deckIDs(a), moved)
+	}
+	if a.deck[a.stage].ID != onAir {
+		t.Fatalf("stage shows %s, want %s", a.deck[a.stage].ID, onAir)
+	}
+	if a.preview != 0 {
+		t.Fatalf("preview = %d, want 0", a.preview)
+	}
+}
+
+func TestReorderWithoutMovingDoesNothing(t *testing.T) {
+	a := seededApp()
+	before := deckIDs(a)
+	a.reorderSlides([]int{1}, 1)
+	if fmt.Sprint(deckIDs(a)) != fmt.Sprint(before) {
+		t.Fatalf("a no-op drag reordered the deck: %v", deckIDs(a))
+	}
+}
+
+func TestReorderIgnoresBadRows(t *testing.T) {
+	a := seededApp()
+	before := deckIDs(a)
+	a.reorderSlides(nil, 0)
+	a.reorderSlides([]int{99}, 0)
+	a.reorderSlides([]int{-3}, 2)
+	if fmt.Sprint(deckIDs(a)) != fmt.Sprint(before) {
+		t.Fatalf("bad rows reordered the deck: %v", deckIDs(a))
+	}
+}
+
+// Move down keeps the moved slide on air and puts its neighbour on air with
+// it, like a drag that carries the stage along.
+func TestMoveSlideUsesTheReorder(t *testing.T) {
+	a := seededApp()
+	a.stage, a.preview = 0, 0
+	second := a.deck[1].ID
+	a.moveSlide(1)
+	if a.preview != 1 {
+		t.Fatalf("preview = %d, want 1", a.preview)
+	}
+	if a.stage != 1 {
+		t.Fatalf("stage = %d, want the slide that moved to 1", a.stage)
+	}
+
+	// Moving a row that is not on air leaves the stage alone.
+	a.stage, a.preview = 0, 2
+	b := seededApp()
+	_ = b
+	onAir := a.deck[0].ID
+	a.moveSlide(1)
+	if got := a.deck[a.stage].ID; got != onAir {
+		t.Fatalf("stage shows %s, want %s", got, onAir)
+	}
+	if a.deck[a.preview].ID == "" || a.preview != 3 {
+		t.Fatalf("preview = %d for %s, want the moved row", a.preview, second)
+	}
 }

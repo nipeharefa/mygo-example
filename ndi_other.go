@@ -4,17 +4,30 @@ package main
 
 import (
 	"errors"
+	"time"
 
 	"github.com/egoist/mygo"
 )
 
-// ndiSupported reports whether this build can publish the window; only the
-// darwin build can, so the header leaves the toggle out here.
+// ndiSupported reports whether this build can publish the window; the three
+// platforms with a binding can, so the toggle is hidden elsewhere.
 func ndiSupported() bool { return false }
 
-// ndiStream keeps the app's state and view compiling off macOS; only the
-// darwin build has a sender behind it.
+// ndiStream keeps the app's state and view compiling where no sender is
+// bound; the platforms with a sender have it in ndi_sender.go.
 type ndiStream struct{}
+
+// ndiStats is what the Settings page reports about the stream.
+type ndiStats struct {
+	Frames, Dropped int64
+	Width, Height   int
+	FPS             float64
+	Uptime          time.Duration
+	Err             string
+}
+
+// snapshot reports nothing: no sender was started.
+func (s *ndiStream) snapshot() ndiStats { return ndiStats{} }
 
 // Stop does nothing: no sender was started.
 func (s *ndiStream) Stop() {}

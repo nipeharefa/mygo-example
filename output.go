@@ -50,8 +50,8 @@ func (a *app) liveView(c *ui.Context) {
 	})
 }
 
-// openOutput creates the second window, or brings it back when it already
-// exists. On a machine with a second display it opens fullscreen there.
+// openOutput creates the stage window, or brings it back when it already
+// exists. A display picked in Settings places it there, fullscreen.
 func (a *app) openOutput() {
 	if a.live != nil {
 		a.live.Show()
@@ -60,7 +60,7 @@ func (a *app) openOutput() {
 	}
 	// Frameless, so the capture NDI publishes is the slide alone: no title
 	// bar, traffic lights or resize edges in the feed.
-	opts := mygo.WindowOptions{
+	live := a.newWindow(mygo.WindowOptions{
 		Title:           appTitle + " — Live",
 		Width:           1280,
 		Height:          720,
@@ -69,69 +69,81 @@ func (a *app) openOutput() {
 		Frameless:       true,
 		BackgroundColor: stageBackgroundHex,
 		Content:         ui.View(a.liveView),
-	}
-	if d, ok := chooseDisplay(a.displays, a.outputDisplay); ok {
-		opts.X, opts.Y = int(d.Bounds.X), int(d.Bounds.Y)
-		opts.Width, opts.Height = int(d.Bounds.Width), int(d.Bounds.Height)
-		opts.FullScreen = true
-	}
-	live := mygo.NewWindow(opts)
-	a.live = live
-	live.OnClosed(func() {
-		// Only clear if this window is still the current one: a close racing
-		// a reopen must not drop the new window's state.
-		if a.live != live {
-			return
-		}
-		a.stopNDI()
-		a.live = nil
-		a.changed()
 	})
+	a.live = live
+	a.stageDisplayUsed = 0
+	// Both callbacks are guarded by identity: a close or a fullscreen event
+	// from a stage that has since been replaced must not touch the new one.
+	live.OnClosed(func() { a.shutStage(live) })
+	live.OnEnterFullScreen(func() { a.placeStage(live) })
+	if !a.placeStage(live) {
+		a.changed()
+	}
+}
+
+// placeStage puts the open stage where the preference says: fullscreen on
+// the picked display, or a window on the console's screen. Placement runs
+// after creation so the platform call sees a real window.
+func (a *app) placeStage(live *mygo.Window) bool {
+	if live == nil || a.live != live {
+		return false
+	}
+	if d, ok := stageDisplayFound(a.displays, a.stageDisplay); ok {
+		live.SetPosition(int(d.WorkArea.X), int(d.WorkArea.Y))
+		live.SetFullScreen(true)
+		a.stageDisplayUsed = d.ID
+	} else {
+		live.SetFullScreen(false)
+		a.stageDisplayUsed = 0
+	}
 	if a.ndiOn {
 		_ = a.startNDI()
 	}
 	a.changed()
+	return true
 }
 
-// closeOutput drops the live window and the NDI source that was publishing
-// it. Closing through OnClosed would do the same, but nil-ing first keeps a
-// stale pointer out of the next frame.
+// shutStage runs once when the stage window closes, whether from the
+// console, its own Esc, or the window's close button.
+func (a *app) shutStage(live *mygo.Window) {
+	if live == nil || a.live != live {
+		return
+	}
+	a.live = nil
+	a.stageDisplayUsed = 0
+	a.stopNDI()
+	a.changed()
+}
+
+// closeOutput drops the stage window and the NDI source publishing it. The
+// window is forgotten first, so its own close event finds nothing to do.
 func (a *app) closeOutput() {
 	live := a.live
 	if live == nil {
 		return
 	}
-	a.live = nil
-	a.stopNDI()
-	a.changed()
+	a.shutStage(live)
+	if live.IsFullScreen() {
+		live.SetFullScreen(false)
+	}
 	live.Close()
 }
 
-// togglePresent switches the live window between windowed and fullscreen.
+// togglePresent switches the stage between windowed and fullscreen.
 func (a *app) togglePresent() {
-	if a.live == nil {
+	live := a.live
+	if live == nil {
 		return
 	}
-	a.live.SetFullScreen(!a.live.IsFullScreen())
+	if live.IsFullScreen() {
+		live.SetFullScreen(false)
+		a.stageDisplayUsed = 0
+	} else if d, ok := stageDisplayFound(a.displays, a.stageDisplay); ok {
+		live.SetPosition(int(d.WorkArea.X), int(d.WorkArea.Y))
+		live.SetFullScreen(true)
+		a.stageDisplayUsed = d.ID
+	} else {
+		live.SetFullScreen(true)
+	}
 	a.changed()
-}
-
-// chooseDisplay picks where the stage opens. An explicit display wins when it
-// is still reported; automatic takes the first non-primary display, so a
-// projector gets the output; with one screen the stage is a plain window.
-func chooseDisplay(displays []mygo.Display, id int64) (mygo.Display, bool) {
-	if id != 0 {
-		for _, d := range displays {
-			if d.ID == id {
-				return d, true
-			}
-		}
-		return mygo.Display{}, false
-	}
-	for _, d := range displays {
-		if !d.Primary {
-			return d, true
-		}
-	}
-	return mygo.Display{}, false
 }

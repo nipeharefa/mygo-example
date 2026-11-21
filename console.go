@@ -30,7 +30,10 @@ func (a *app) view(c *ui.Context) {
 	c.OnShortcut(0, ui.KeyB, a.toggleBlackout)
 	c.OnWindowShortcut(ui.Cmd, ui.KeyEnter, a.takeSlide)
 	c.OnWindowShortcut(ui.Ctrl, ui.KeyEnter, a.takeSlide)
+	c.OnWindowShortcut(ui.Cmd, ui.KeyComma, a.showSettings)
+	c.OnWindowShortcut(ui.Ctrl, ui.KeyComma, a.showSettings)
 	a.shell(c)
+	a.settle()
 }
 
 // login is the demo gate: one card, two fields, one account.
@@ -70,6 +73,7 @@ func (a *app) login(c *ui.Context) {
 // to an app method that changes state and invalidates both windows.
 func (a *app) shell(c *ui.Context) {
 	t := c.Theme()
+	a.statsWanted = false
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
 		a.topBar(c)
 		if a.ndiErr != "" {
@@ -78,15 +82,19 @@ func (a *app) shell(c *ui.Context) {
 			})
 		}
 		ui.Divider(c)
-		// Stretch, because a Row centers its children vertically by default:
-		// the panels are content-height otherwise.
-		ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
-			a.library(c)
-			ui.Divider(c)
-			a.service(c)
-			ui.Divider(c)
-			a.stagePanel(c)
-		})
+		if a.page == pageSettings {
+			a.settingsBody(c)
+		} else {
+			// Stretch, because a Row centers its children vertically by
+			// default: the panels are content-height otherwise.
+			ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
+				a.library(c)
+				ui.Divider(c)
+				a.service(c)
+				ui.Divider(c)
+				a.stagePanel(c)
+			})
+		}
 	})
 }
 
@@ -101,7 +109,7 @@ func (a *app) topBar(c *ui.Context) {
 		ui.Spacer(c)
 		a.statusPill(c)
 		if a.live == nil {
-			ui.Button(c, "Open output").OnClick(a.openOutput)
+			ui.Button(c, "Open output").OnClick(a.requestStage)
 		} else {
 			if a.live.IsFullScreen() {
 				ui.Button(c, "Exit full screen").OnClick(a.togglePresent)
@@ -113,6 +121,7 @@ func (a *app) topBar(c *ui.Context) {
 				ui.Button(c, a.ndiLabel()).OnClick(a.toggleNDI)
 			}
 		}
+		ui.Button(c, "Settings").Label("Settings").OnClick(a.showSettings)
 		ui.Button(c, "Sign out").OnClick(a.signOut)
 	})
 }
@@ -283,6 +292,8 @@ func (a *app) service(c *ui.Context) {
 		a.deckList.Label = func(i int) string {
 			return fmt.Sprintf("Slide %d: %s", i+1, a.deck[i].caption())
 		}
+		// Dragging a row reorders the deck; the stage stays on whatever it is
+		// airing. Move up/down is the same rule from the keyboard.
 		ui.List(c, &a.deckList, len(a.deck), func(i int) {
 			a.deckRow(c, i)
 		}).Grow(1).OnSubmit(a.takeSlide)

@@ -14,7 +14,7 @@ func buildMenu(a *app) *mygo.Menu {
 		ID:          "settings",
 		Label:       "Settings…",
 		Accelerator: "CmdOrCtrl+,",
-		Click:       func(*mygo.MenuItem, *mygo.Window) { a.openSettings() },
+		Click:       func(*mygo.MenuItem, *mygo.Window) { a.showSettings() },
 	}
 	help := &mygo.MenuItem{
 		ID:    "help",
