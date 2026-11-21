@@ -25,13 +25,21 @@ func (a *app) view(c *ui.Context) {
 	}
 	// Window shortcuts for the console. Text fields take the arrow keys
 	// first, so typing in the search box never moves the deck.
-	c.OnShortcut(0, ui.KeyRight, a.nextSlide)
-	c.OnShortcut(0, ui.KeyLeft, a.prevSlide)
-	c.OnShortcut(0, ui.KeyB, a.toggleBlackout)
-	c.OnWindowShortcut(ui.Cmd, ui.KeyEnter, a.takeSlide)
-	c.OnWindowShortcut(ui.Ctrl, ui.KeyEnter, a.takeSlide)
-	c.OnWindowShortcut(ui.Cmd, ui.KeyComma, a.showSettings)
-	c.OnWindowShortcut(ui.Ctrl, ui.KeyComma, a.showSettings)
+	if a.page == pageSettings {
+		// The Settings page keeps only its own way out.
+		c.OnWindowShortcut(ui.Cmd, ui.KeyComma, a.showConsole)
+		c.OnWindowShortcut(ui.Ctrl, ui.KeyComma, a.showConsole)
+		c.OnWindowShortcut(ui.Cmd, ui.KeyEscape, a.showConsole)
+		c.OnWindowShortcut(ui.Ctrl, ui.KeyEscape, a.showConsole)
+	} else {
+		c.OnShortcut(0, ui.KeyRight, a.nextSlide)
+		c.OnShortcut(0, ui.KeyLeft, a.prevSlide)
+		c.OnShortcut(0, ui.KeyB, a.toggleBlackout)
+		c.OnWindowShortcut(ui.Cmd, ui.KeyEnter, a.takeSlide)
+		c.OnWindowShortcut(ui.Ctrl, ui.KeyEnter, a.takeSlide)
+		c.OnWindowShortcut(ui.Cmd, ui.KeyComma, a.showSettings)
+		c.OnWindowShortcut(ui.Ctrl, ui.KeyComma, a.showSettings)
+	}
 	a.shell(c)
 	a.settle()
 }

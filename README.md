@@ -41,13 +41,15 @@ are looking at). Moving the monitor never changes the room until you press
 3. Click a row, use **←** / **→**, or press **Next** / **Prev** to move the
    monitor. Press **Go Live**, **Enter** on the list, or **Cmd/Ctrl+Enter**
    to put that row on stage. The row on air carries a `LIVE` badge.
-4. **Move up**, **Move down** and **Remove** edit the list; **Black out**
-   hides the text without touching the list.
-5. **Open output** opens the stage window. On a second display it opens
-   there fullscreen; otherwise it is a normal 1280×720 window.
-   **Present** toggles fullscreen, **Close output** closes it. **Settings**
-   (Cmd/Ctrl+,) picks the display for the stage and turns NDI on or off;
-   **Help** lists the shortcuts and the NDI setup.
+4. Drag a row to move it, or use **Move up** / **Move down**; the slide on
+   air stays on air wherever its row lands. **Remove** drops the selected
+   row, and **Black out** hides the text without touching the list.
+5. **Open output** opens the stage window. It is a 1280×720 window unless
+   **Settings** names a display, in which case it opens fullscreen there.
+   **Present** toggles fullscreen, **Close output** closes it. The
+   **Settings** page (Cmd/Ctrl+, or the button in the top bar) also holds
+   the NDI switch and the stream's own stats; the **Help** menu lists the
+   shortcuts and the NDI setup.
 
 The console shortcuts are **←** / **→** for the monitor, **B** for blackout,
 and **Cmd/Ctrl+Enter** to go live. In the stage window **← → ↑ ↓** and
@@ -56,8 +58,11 @@ and **Esc** leaves fullscreen; when the stage is windowed, **Esc** closes
 it. The stage window has no title bar, so drag the slide itself to move it
 to a projector; the console can stay with the operator.
 
+The stage opens once and stays open until you close it: changing anything
+that does not touch the display the stage is on leaves it alone.
+
 The display and NDI preferences are saved between runs; the run of show is
-not.
+not. A saved display that is no longer attached falls back to a window.
 
 ## The live output as an NDI source
 
@@ -65,8 +70,14 @@ The stage window can publish itself as an NDI source on macOS, Windows
 and Linux. Each platform needs the NDI Runtime installed (version 5 or 6),
 and the console reports a missing or unusable runtime in a strip under the
 header instead of failing silently. NDI publishes only while the stage
-window is open; closing it stops the stream. The switch in **Settings**
-sets the same preference as **Start NDI** in the header.
+window is open; closing it stops the stream. The switch on the
+**Settings** page sets the same preference as **Start NDI** in the header.
+
+The **NDI stream** section of Settings reports the sender's own numbers —
+resolution, measured frame rate, frames sent, dropped frames, up time and
+the last error — so "is it actually publishing, and in HD?" has an answer
+without opening OBS. NDI 5 and 6 give a sender no receiver tally, so the
+numbers describe the stream, not who is watching it.
 
 The source is called `mygo-demo (Live)`. Other machines see it as
 `<machine name> (mygo-demo (Live))`.

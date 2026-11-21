@@ -27,9 +27,9 @@ data directory.
 The console's view sets the console theme, draws the login card while
 `!a.signedIn`, and otherwise registers the console shortcuts and draws the
 shell. The stage is a separate `mygo.Window` created later by
-`openOutput`, with its own `ui.View(a.liveView)`; Settings and Help are two
-more windows, created by `openSettings` and `openHelp`. Every window's
-view is a pure builder, and `changed()` invalidates all four of them.
+`openOutput`, with its own `ui.View(a.liveView)`; Settings is a page of the
+console and Help is a third window, created by `openHelp`. Every window's
+view is a pure builder, and `changed()` invalidates all of them.
 
 ## State
 
@@ -44,8 +44,12 @@ element or a context:
 | `deck []slide`, `preview int`, `stage int` | the run of show, the row selected in the monitor, and the row on air |
 | `blackout bool` | the stage shows a black frame, deck unchanged |
 | `nextID int`, `deckList ui.ListState` | slide id counter and the list's persistent state |
-| `win`, `live`, `settings`, `help *mygo.Window` | the console, stage, Settings and Help windows |
-| `displays []mygo.Display`, `outputDisplay int64` | the display list and the chosen stage display (0 = automatic) |
+| `win`, `live`, `help *mygo.Window` | the console, stage and Help windows; Settings is a page of the console |
+| `displays []mygo.Display`, `stageDisplay int64` | the display list and the chosen stage display (0 = a window) |
+| `stageDisplayUsed int64` | the display the open stage was actually placed on |
+| `page int` | `pageConsole` or `pageSettings` |
+| `openStage`, `statsWanted bool` | what the current frame asked for: open the stage after it is built, keep the stats timer running |
+| `newWindow`, `mainScreen` | seams over `mygo.NewWindow` and `mygo.Screen.Displays`, so logic is testable without an application |
 | `ndiOn bool`, `ndi *ndiStream`, `ndiErr string` | NDI preference, sender and last error |
 | `settingsDir string`, `version string` | where `settings.json` lives and what Help reports |
 
@@ -144,12 +148,13 @@ their keys while focused, so typing in a search box does not move the deck.
   traffic lights or resize edges, on screen or in the NDI feed. The slide
   column calls `DragWindow()`, so dragging anywhere on the slide moves a
   windowed output.
-- If `chooseDisplay` finds the chosen display (an explicit Settings choice,
-  else the first non-primary display), the window's position and size are
-  set to that display's bounds and it opens fullscreen. Otherwise it is an
-  ordinary windowed window on the current display; the operator can drag it
-  to a projector and press **Present**. Changing the display in Settings
-  saves the choice and reopens an open stage on the new display.
+- `placeStage` asks `stageDisplayFound` for the chosen display. When it
+  returns one, the window's position and size are set to that display's
+  work area and it opens fullscreen; otherwise it is an ordinary window on
+  the current screen, and the operator can drag it to a projector and press
+  **Present**. The frame it was placed on is remembered in
+  `stageDisplayUsed`, and `OnEnterFullScreen` re-asserts the placement, so
+  a fullscreen transition cannot leave it on the wrong display.
 
 `liveView` draws a black fill while `a.blackout`, and otherwise the
 stage slide (`a.stageSlide()`, not the monitor row) as a centered slide (eyebrow, 40 pt text, caption) on the forced-dark stage theme. Its
@@ -158,21 +163,40 @@ fullscreen when `a.live.IsFullScreen()` and closes the output otherwise —
 the only way out of a window with no title bar.
 
 `openOutput` when a window already exists just calls `Show()` and
-`Focus()`. `closeOutput` nils `a.live` first, stops NDI, invalidates the
-console, and closes the window. The window's `OnClosed` callback does the
-same cleanup for a close from the window's own chrome, guarded with
-`if a.live != live { return }` so a late close event cannot clear a window
-that was reopened in the meantime. If `a.ndiOn` is set, `openOutput`
-starts NDI right after the window exists.
+`Focus()`. `shutStage` nils `a.live` first, stops NDI and invalidates the
+console; `OnClosed` calls it guarded with `if a.live != live { return }`,
+so a late close event cannot clear a window that was reopened meanwhile.
+Nilling before `Close()` matters: a `Close()` whose `OnClosed` guard is
+already satisfied never reaches the backend's `destroy()`.
+`closeOutput` = `shutStage`, then leave fullscreen, then `Close()`. If
+`a.ndiOn` is set, `openOutput` starts NDI right after the window exists.
+
+The stage opens once and stays there. Nothing reopens it from a display
+notification: `refreshDisplays` saves a preference whose display went away
+and only closes and reopens the stage when `stageDisplayUsed` itself is
+gone. That is what used to loop — a recreated fullscreen window posted
+another display change from inside `openOutput`.
 
 ### Settings
 
-`openSettings` creates the window once and focuses it afterwards. It has no
-login gate, but it exposes nothing private: the stage display radios
-(**Automatic** plus one per display, each showing label and size), the NDI
-switch, the NDI status line, and a short data note. Choosing a display or
-toggling NDI saves immediately; both callbacks return through `changed()`,
-and an open stage is reopened so the new display takes effect.
+Settings is a page of the console (`a.page = pageSettings`), reached from
+the **Settings** button, the **Cmd/Ctrl+,** shortcut or the menu, and left
+with **Back to console**, **Cmd/Ctrl+,** again or **Cmd/Ctrl+Esc**. While it
+is open the deck shortcuts (arrows, B, Enter) are not registered, so a
+keystroke cannot move the monitor behind the page. It shows the stage output
+radios (**Windowed on this screen** plus one per display, each with label,
+role and size), the NDI switch and status line, the **NDI stream** stats,
+and a short data note. Choosing a display or toggling NDI saves
+immediately; a display change reopens an open stage on the new display.
+
+The stats are the sender's own: resolution and measured frame rate of the
+last frame, frames sent, frames skipped when the capture missed, up time
+and the last error, from `ndiStream.snapshot()`. NDI 5 and 6 expose no
+receiver tally, so this describes the stream, not its audience. While the
+page is open and NDI is publishing, `console.go` sets `statsWanted` for the
+frame and `tickStats` re-arms a one-second `time.AfterFunc` that
+invalidates the console — a main-thread timer, never a goroutine touching
+the view.
 
 ### Help
 
@@ -271,12 +295,17 @@ tests must not press **Open output**).
 - `deck_test.go` — data reachability (every song/verse resolves), unique
   slide ids, section expansion, unknown ids, monitor clamping, take, stage
   next/prev, removal from and above the stage, reorder without changing
-  what is on air, blackout, `stageSlide`/`previewSlide`/`upcomingSlide`,
-  and `changed()` with no windows attached.
+  what is on air (single rows, multi-row drags, and `to` as a gap),
+  `Move up`/`Move down` going through the same reorder, blackout,
+  `stageSlide`/`previewSlide`/`upcomingSlide`, and `changed()` with no
+  windows attached.
 - `settings_test.go` — the settings round-trip, missing and corrupt files,
-  the empty `settingsDir` no-op, dropping a display that went away,
-  `chooseDisplay`, the Settings view with and without displays, and display
-  refresh without a stage.
+  the empty `settingsDir` no-op, the legacy `outputDisplay` key, dropping a
+  display that went away, `stageDisplayFound`, the Settings page with and
+  without displays, display refresh without a stage and without reopening
+  one, and the stats formatting.
+- `ndi_stats_test.go` — the sender's counters and measured rate without a
+  runtime.
 - `help_test.go`, `menu_test.go` — Help sections with and without a
   version; menu item IDs, the Settings accelerator, and click handlers
   present (clicks are not run, because they open windows).
@@ -321,6 +350,8 @@ agent session, prefix Go commands with `GOCACHE="$TMPDIR/gocache-mygo-demo"`.
 
 ## Known drift and gaps
 
+- **The stage is one window.** There is no separate preview output and no
+  per-display preview; the monitor lives in the console.
 - **Only the display and NDI preferences persist.** They live in
   `settings.json` under the app data directory; the deck, the search boxes
   and the selected pack live only in the process, so closing the app starts

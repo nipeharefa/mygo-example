@@ -340,3 +340,38 @@ func TestCommandEnterTakesTheSlide(t *testing.T) {
 		t.Fatalf("Cmd+Enter left the stage at %d, want 1", a.stage)
 	}
 }
+
+func TestSettingsPageOpensAndCloses(t *testing.T) {
+	a, tt := signedInApp(t)
+	if err := tt.Click("Settings"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.page != pageSettings {
+		t.Fatalf("page = %d, want the Settings page", a.page)
+	}
+	if !tt.HasText("Stage output") {
+		t.Fatal("the Settings page should show the stage output section")
+	}
+	if err := tt.Click("Back to console"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.page != pageConsole {
+		t.Fatalf("page = %d, want the console", a.page)
+	}
+	if !tt.HasText("Run of show") {
+		t.Fatal("the console should be back")
+	}
+}
+
+func TestSettingsPageIgnoresDeckShortcuts(t *testing.T) {
+	a, tt := signedInApp(t)
+	a.showSettings()
+	tt.Frame()
+	before := a.preview
+	tt.Key(0, ui.KeyRight)
+	if a.preview != before {
+		t.Fatalf("preview moved to %d on the Settings page", a.preview)
+	}
+}

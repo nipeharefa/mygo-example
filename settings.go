@@ -153,13 +153,25 @@ func (a *app) showSettings() {
 	a.changed()
 }
 
+// showConsole leaves the Settings page for the run of show.
+func (a *app) showConsole() {
+	a.page = pageConsole
+	a.changed()
+}
+
 // settingsBody is the Settings page of the console: where the stage opens,
 // whether NDI publishes and how that stream is doing, and what is saved.
 func (a *app) settingsBody(c *ui.Context) {
 	t := c.Theme()
 	ui.Scroll(c).Fill().Padding(24, 28).Children(func() {
 		ui.Column(c).Gap(16).MaxWidth(c.Theme().Rem(72)).Children(func() {
-			ui.Text(c, "Settings").FontSize(20).Bold()
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "Settings").FontSize(20).Bold().SingleLine()
+					ui.Text(c, "Preferences for the stage window and the NDI stream.").FontSize(11).TextColor(t.TextMuted).SingleLine()
+				})
+				ui.Button(c, "Back to console").Label("Back to console").OnClick(a.showConsole)
+			})
 
 			settingsHeading(c, "Stage output")
 			ui.Text(c, "A display opens the stage fullscreen there. A window stays on this screen; drag it to a projector and press Present.").

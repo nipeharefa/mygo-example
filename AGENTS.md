@@ -70,12 +70,20 @@ identity rules live in
   mutate `app` from callbacks, never from inside the build pass. Sign-out
   closes the output and stops NDI.
 - **Windows come from main-thread callbacks, and tests never open one.**
-  `mygo.NewWindow` is called by `openOutput`, `openSettings` and `openHelp`
-  from `OnClick`/`OnSubmit`/menu callbacks after `WhenReady`; never from
-  the build pass and never from a test, because a headless `ui.Tester` has
-  no application. Settings/Help reuse the existing window instead of
-  opening a second one. `buildMenu` is headless-safe and its structure is
-  tested; its click callbacks are not.
+  `mygo.NewWindow` is called only through `a.newWindow`, from `openOutput`
+  and `openHelp` after `WhenReady`, never from the build pass and never
+  from a test, because a headless `ui.Tester` has no application. The
+  console asks for the stage with `requestStage` and `settle` opens it after
+  the frame is built. Tests inject `a.newWindow`/`a.mainScreen` or leave
+  them alone; either way they never call one. `buildMenu` is headless-safe
+  and its structure is tested; its click callbacks are not.
+- **The stage opens once.** `openOutput` places it from a display
+  (`stageDisplayFound`) or keeps it windowed, and `placeStage` re-asserts
+  that on enter-fullscreen. Only an explicit action (Open output, picking a
+  display) or the display the stage is using going away (`refreshDisplays`)
+  closes and reopens it. Never reopen it from a display notification, and
+  nil `a.live` before `Close()` — a `Close()` whose `OnClosed` guard has
+  already been satisfied never destroys the window.
 - **Settings persistence is the only persistence.**
   `settings.go` reads and writes `settings.json` (display ID, NDI on/off)
   in `mygo.App.Path(mygo.PathUserData)`. `a.settingsDir` is empty until
@@ -141,21 +149,22 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 
 | Path | What |
 | --- | --- |
-| `main.go` | The app: `app` state, the demo account, sign-in/out, `changed`, `setNDI`/`toggleNDI`/`ndiLabel`, `main()` startup order (app data dir, displays, `loadSettings`, menu, console window, `MYGO_NDI`, `OnQuit`), and the `stageSourceName` constant. |
+| `main.go` | The app: `app` state and its `newWindow`/`mainScreen` seams, the demo account, sign-in/out, `changed`, `requestStage`/`settle`, `tickStats`, `setNDI`/`toggleNDI`/`ndiLabel`, `main()` startup order (app data dir, saved preferences, menu, display subscription, console window, first display refresh, stats timer), and the `stageSourceName` constant. |
 | `data.go` | The library: 5 public-domain hymns (10 sections) and 4 KJV verse packs (16 verses), plus `songByID`/`verseByRef`. No data here is fetched or stored. |
-| `deck.go` | The run-of-show model: `slide`, `slideKind`, add/select/next/prev (monitor), `takeSlide`, `nextStage`/`prevStage`, remove/move/blackout, `stageSlide`/`previewSlide`/`upcomingSlide`, `clampSlides`. |
+| `deck.go` | The run-of-show model: `slide`, `slideKind`, add/select/next/prev (monitor), `takeSlide`, `nextStage`/`prevStage`, remove/move/blackout, `reorderSlides` (the drag and Move up/down path, `to` is a gap), `stageSlide`/`previewSlide`/`upcomingSlide`, `clampSlides`. |
 | `console.go` | The console view: top bar, library (Songs/Bible tabs, search, pack picker), run of show list with the LIVE badge, the two-card stage/monitor panel with Go Live, and the login card. |
-| `output.go` | The stage window: `liveView`, stage shortcuts, `openOutput`/`closeOutput`/`togglePresent`, and `chooseDisplay` for fullscreen placement. |
+| `output.go` | The stage window: `liveView`, stage shortcuts, `openOutput`/`closeOutput`/`togglePresent`, `placeStage`/`shutStage`. |
 | `theme.go` | The only file with literal colors: warm console theme (light/dark) and the forced-dark stage theme. |
 | `menu.go` | `buildMenu` (app, edit, Settings, Help menus) and `showAbout`. |
-| `settings.go` | The Settings window, display radios, NDI switch and status line, `settings.json` read/write, `loadSettings`/`saveSettings`, `refreshDisplays`. |
+| `settings.go` | The Settings page of the console: display radios, NDI switch and status line, the NDI stream stats, `settings.json` read/write, `loadSettings`/`saveSettings`, `refreshDisplays`. |
 | `help.go` | The Help window: about, keyboard table, NDI notes, sample-data notes. |
 | `view_test.go` | Headless console tests: login gate, library, add/search, monitor vs stage (click, Go Live, Enter, Cmd+Enter), arrows, blackout, empty deck, sign out. |
 | `menu_test.go` | Headless menu structure: item IDs, accelerator, click handlers present (clicks not run). |
-| `settings_test.go` | Settings round-trip, missing/corrupt defaults, `chooseDisplay`, settings/help view rendering, display refresh. |
+| `settings_test.go` | Settings round-trip, missing/corrupt defaults, legacy `outputDisplay` migration, `stageDisplayFound`, the Settings page rendering, display refresh without reopening the stage. |
 | `deck_test.go` | Headless model tests: data reachability, ids, clamping, reorder, blackout, `changed()` without windows. |
 | `output_test.go` | Headless stage tests: the stage slide (not the monitor), next/prev move both, blackout hides text, stage shortcuts, NDI waits for the stage or clears the preference. |
-| `ndi_sender.go` | The NDI half every platform shares: candidate walk, versioned-table binding with a named-export fallback, `startNDISender`, the frame loop, `Stop`. |
+| `ndi_sender.go` | The NDI half every platform shares: candidate walk, versioned-table binding with a named-export fallback, `startNDISender`, the frame loop, `Stop`, and the `ndiStats` counters `snapshot` reports. |
+| `ndi_stats_test.go` | The stats counters and rate without a runtime; skips where NDI is not built. |
 | `ndi_sender_test.go` | Proves the table indices (0/8/9/50) match the functions a real installed runtime also exports by name; skips without NDI. |
 | `ndi_darwin.go` | `purego` dlopen/dlsym plus `CGWindowListCreateImage` capture of the frameless live window at the display's pixel density, capped to 1920×1080 by `ndiFrameSize`, on screen only. |
 | `ndi_windows.go` | The NDI sender: `syscall` binding of the NDI DLL plus GDI `PrintWindow` capture into a 32-bit DIB. |
