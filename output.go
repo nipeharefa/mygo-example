@@ -70,7 +70,7 @@ func (a *app) openOutput() {
 		BackgroundColor: stageBackgroundHex,
 		Content:         ui.View(a.liveView),
 	}
-	if d, ok := secondDisplay(); ok {
+	if d, ok := chooseDisplay(a.displays, a.outputDisplay); ok {
 		opts.X, opts.Y = int(d.Bounds.X), int(d.Bounds.Y)
 		opts.Width, opts.Height = int(d.Bounds.Width), int(d.Bounds.Height)
 		opts.FullScreen = true
@@ -116,10 +116,19 @@ func (a *app) togglePresent() {
 	a.changed()
 }
 
-// secondDisplay returns the first display that is not the primary one, so a
-// projector plugged in on the right gets the output fullscreen.
-func secondDisplay() (mygo.Display, bool) {
-	for _, d := range mygo.Screen.Displays() {
+// chooseDisplay picks where the stage opens. An explicit display wins when it
+// is still reported; automatic takes the first non-primary display, so a
+// projector gets the output; with one screen the stage is a plain window.
+func chooseDisplay(displays []mygo.Display, id int64) (mygo.Display, bool) {
+	if id != 0 {
+		for _, d := range displays {
+			if d.ID == id {
+				return d, true
+			}
+		}
+		return mygo.Display{}, false
+	}
+	for _, d := range displays {
 		if !d.Primary {
 			return d, true
 		}

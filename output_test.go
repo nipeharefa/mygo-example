@@ -107,3 +107,52 @@ func TestNDIHiddenWithoutOutput(t *testing.T) {
 		t.Fatalf("the console offers NDI before the output is open: %q", tt.Texts())
 	}
 }
+
+// The output shows the stage, not the row the operator is looking at on the
+// monitor.
+func TestLiveViewRendersTheStageNotTheMonitor(t *testing.T) {
+	a := newApp()
+	a.selectSlide(2)
+	tt := testLive(a)
+
+	stage := mustStage(t, a)
+	if !tt.HasText(stage.firstLine()) {
+		t.Fatalf("the live view does not show the stage slide %q: %q", stage.firstLine(), tt.Texts())
+	}
+	monitor, ok := a.previewSlide()
+	if !ok {
+		t.Fatal("no preview slide")
+	}
+	if monitor.ID != stage.ID && tt.HasText(monitor.firstLine()) {
+		t.Fatalf("the live view shows the monitor slide %q", monitor.firstLine())
+	}
+}
+
+// Turning NDI on with no stage open records the preference and waits.
+func TestSetNDIWaitsForTheStage(t *testing.T) {
+	if !ndiSupported() {
+		t.Skip("NDI is not built in")
+	}
+	a := &app{}
+	a.setNDI(true)
+	if !a.ndiOn {
+		t.Fatal("the NDI preference was not recorded")
+	}
+	if a.ndi != nil {
+		t.Fatal("NDI started without a stage window")
+	}
+	if a.ndiErr != "" {
+		t.Fatalf("waiting for the stage set an error: %q", a.ndiErr)
+	}
+}
+
+func TestSetNDIOffClearsThePreference(t *testing.T) {
+	a := &app{ndiOn: true, ndiErr: "old error"}
+	a.setNDI(false)
+	if a.ndiOn {
+		t.Fatal("the NDI preference was not cleared")
+	}
+	if a.ndi != nil || a.ndiErr != "" {
+		t.Fatalf("NDI is still publishing: ndi=%v err=%q", a.ndi, a.ndiErr)
+	}
+}

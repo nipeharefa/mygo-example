@@ -21,7 +21,6 @@ import (
 // per-platform files only say where the library is and how to capture the
 // window.
 const (
-	ndiSourceName = "mygo-demo (Live)"
 
 	// ndiFrameRate paces the capture loop: sending with the video clock on
 	// blocks until the next frame is due, so the loop cannot outrun it.
@@ -240,7 +239,7 @@ func startNDISender(win *mygo.Window) (*ndiStream, error) {
 		rt.close()
 		return nil, errors.New("the NDI runtime failed to initialize")
 	}
-	name := append([]byte(ndiSourceName), 0)
+	name := append([]byte(stageSourceName), 0)
 	settings := ndiSendCreate{name: &name[0], clockVideo: 1}
 	send := rt.sendCreate(&settings)
 	runtime.KeepAlive(name)

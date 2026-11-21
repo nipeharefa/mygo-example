@@ -14,6 +14,11 @@ const (
 	appTitle    = "mygo-demo"
 	appSubtitle = "Worship presenter"
 
+	// stageSourceName is how the NDI source finds the app in OBS and the NDI
+	// tools. It carries the window's name, not the brand: an operator looks
+	// for the stage, not for the product.
+	stageSourceName = "mygo-demo (Live)"
+
 	consoleWidth     = 1280
 	consoleHeight    = 800
 	consoleMinWidth  = 1040
@@ -153,13 +158,10 @@ func (a *app) stopNDI() {
 	a.ndi = nil
 }
 
-// toggleNDI is the header button's action.
+// toggleNDI is the header button: it flips the NDI preference through
+// setNDI, so the button and the Settings switch cannot disagree.
 func (a *app) toggleNDI() {
-	if a.ndi != nil {
-		a.stopNDI()
-		return
-	}
-	_ = a.startNDI()
+	a.setNDI(a.ndi == nil)
 }
 
 // ndiLabel names the button after what clicking it does.
@@ -172,8 +174,23 @@ func (a *app) ndiLabel() string {
 
 func main() {
 	a := newApp()
-	a.ndiOn = os.Getenv("MYGO_NDI") != ""
 	mygo.App.WhenReady(func() {
+		// Order matters: the display list is needed to normalize the saved
+		// preference, and the menu is built from the version.
+		if dir, err := mygo.App.Path(mygo.PathUserData); err == nil {
+			a.settingsDir = dir
+		} else {
+			log.Printf("mygo-demo: no app data directory: %v", err)
+		}
+		a.displays = mygo.Screen.Displays()
+		a.loadSettings()
+		if os.Getenv("MYGO_NDI") != "" {
+			// Session-only override: publish without rewriting the preference.
+			a.ndiOn = true
+		}
+		a.version = mygo.App.Version()
+		mygo.App.SetMenu(buildMenu(a))
+		mygo.Screen.OnDisplaysChanged(a.displaysChanged)
 		a.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:     appTitle,
 			Width:     consoleWidth,

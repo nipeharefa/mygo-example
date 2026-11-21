@@ -328,3 +328,15 @@ func TestEnterTakesTheSlide(t *testing.T) {
 		t.Fatalf("Enter left the stage at %d, want 1", a.stage)
 	}
 }
+
+// Cmd/Ctrl+Enter takes the selected row from anywhere in the console.
+func TestCommandEnterTakesTheSlide(t *testing.T) {
+	a, tt := signedInApp(t)
+	if err := tt.Click("Slide 2: Amazing Grace · Verse 2"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyEnter)
+	if a.stage != 1 {
+		t.Fatalf("Cmd+Enter left the stage at %d, want 1", a.stage)
+	}
+}
