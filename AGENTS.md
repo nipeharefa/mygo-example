@@ -176,7 +176,7 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `src/`, `index.html`, `vite.config.ts` | Leftover web template; nothing renders it. |
 | `.github/workflows/ci.yml` | The test gate, a native Windows run that launches the binary, the macOS/Windows/Linux packaging matrix, and a release job on `v*` tags. |
 | `docs/architecture.md` | How the app works; read this next. |
-| `docs/superpowers/plans/` | Historical plans: the 0.2.0 worship presenter and the monitor/Settings beta. |
+| `docs/superpowers/plans/` | Historical plans: the 0.2.0 worship presenter, the monitor/Settings beta, and the stage/Settings fix in beta.4. |
 
 ## Known state, deliberately untouched
 
