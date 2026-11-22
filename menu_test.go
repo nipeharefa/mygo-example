@@ -31,4 +31,10 @@ func TestBuildMenuItems(t *testing.T) {
 			t.Fatalf("%s item has no click handler", id)
 		}
 	}
+
+	// Check for Updates lives on the console, not in the Help menu: MyGo gives
+	// that menu role to macOS only, so a Windows or Linux install would lose it.
+	if m.ItemByID("check-updates") != nil {
+		t.Fatal("the Help menu should not carry Check for Updates")
+	}
 }

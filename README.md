@@ -68,7 +68,8 @@ does not stop NDI, so a feed can keep running with no stage window at all.
 The display and NDI preferences are saved between runs; the run of show is
 not. A saved display that is no longer attached falls back to a window.
 
-**Help → Check for Updates…** asks GitHub for the newest release and offers
+**Check for Updates** (a button on the console, and on the Help page) asks
+GitHub for the newest release and offers
 to install it; the app then restarts on the new version. Updates work only
 for the installers from a release — a development build, or an install a
 package manager owns (such as the `.deb`), is updated another way. Every

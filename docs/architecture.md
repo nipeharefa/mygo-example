@@ -217,7 +217,10 @@ the view.
 
 ### Updates
 
-**Help → Check for Updates…** runs `checkForUpdates`: the feed is asked on a
+**Check for Updates** is a button on the console, and the same button on the
+help page, because the application menu is macOS-only: MyGo marks the Help
+menu role as macOS-only, and a Windows or Linux install shows no menu bar at
+all. The button runs `checkForUpdates`: the feed is asked on a
 goroutine and the main thread waits for the answer, then `showCheck` puts up
 one dialog — the newest version, the failure, or an offer of the new
 version with **Install and Restart** and **Not Now**. Choosing to install

@@ -168,7 +168,11 @@ only updates signed with it. The tag's base version must match
 `version` in `mygo.config.ts`, and a hyphen (`v0.2.0-beta.1`) publishes a
 prerelease.
 
-The console's Help menu has **Check for Updates…**: it asks the release
+The console has a **Check for Updates** button, and the help page has the
+same button; the application menu does not carry it. `RoleHelp` is in
+MyGo's `macOnlyRoles`, so the Help menu is hidden off macOS and the console
+is the only way into the feature there. It also means a Windows install has
+no menu bar at all. The button asks the release
 feed for a newer version (`mygo.Updater`) and offers to install it. That step
 runs on the main thread and waits for the answer there, holding only the
 network request on a goroutine; it must not hand the answer back with
@@ -197,10 +201,10 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `console.go` | The console view: top bar, library (Songs/Bible tabs, search, pack picker), run of show list with the LIVE badge, the two-card stage/monitor panel with Go Live, and the login card. |
 | `output.go` | The stage window: `liveView`, stage shortcuts, `openOutput`/`closeOutput`/`togglePresent`, `placeStage`/`shutStage`. |
 | `theme.go` | The only file with literal colors: warm console theme (light/dark) and the forced-dark stage theme. |
-| `menu.go` | `buildMenu` (app, edit, Settings, Help menus) and `showAbout`. |
+| `menu.go` | `buildMenu` (app, edit, Settings, Help menus; no Check for Updates, because the Help menu is macOS-only in MyGo) and `showAbout`. |
 | `settings.go` | The Settings page of the console: display radios, NDI switch and status line, the NDI stream stats, `settings.json` read/write, `loadSettings`/`saveSettings`, `refreshDisplays`. |
 | `help.go` | The Help window: about, keyboard table, NDI notes, sample-data notes. |
-| `update.go` | Help → Check for Updates…: `lookForUpdate` (the feed, with a timeout), `checkForUpdates`/`showCheck` (the offer), `installUpdate`, `sayUpdates`, and `newerVersion` for the comparison. |
+| `update.go` | The Check for Updates button: `lookForUpdate` (the feed, with a timeout), `checkForUpdates`/`showCheck` (the offer), `installUpdate`, `sayUpdates`, and `newerVersion` for the comparison. |
 | `update_test.go` | The updater without a window or a feed: version order, the newest-version and error notes, the offer, install-and-restart, Not Now, a failed install, and the two builds that cannot update. |
 | `view_test.go` | Headless console tests: login gate, library, add/search, monitor vs stage (click, Go Live, Enter, Cmd+Enter), arrows, blackout, empty deck, sign out. |
 | `menu_test.go` | Headless menu structure: item IDs, accelerator, click handlers present (clicks not run). |

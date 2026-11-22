@@ -50,6 +50,7 @@ func (a *app) helpView(c *ui.Context) {
 		ui.Row(c).Padding(20, 16).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "Help").FontSize(18).Bold().SingleLine()
 			ui.Spacer(c)
+			ui.Button(c, "Check for Updates").OnClick(a.checkForUpdates)
 			ui.Button(c, "Close").OnClick(a.closeHelp)
 		})
 		ui.Divider(c)
@@ -64,7 +65,7 @@ func (a *app) helpView(c *ui.Context) {
 				ui.Text(c, "A simple worship presenter: build a run of show from the library, keep the next slide on the monitor, and send the stage to the room and to NDI.").
 					FontSize(11).TextColor(t.TextMuted)
 				ui.Text(c, "Demo account: "+demoUsername+" / "+demoPassword).FontSize(11).TextColor(t.TextMuted).SingleLine()
-				ui.Text(c, "Help → Check for Updates… reads the latest release; only the installers from a release can update themselves.").
+				ui.Text(c, "Check for Updates asks the release feed for a newer version; only the installers from a release can update themselves.").
 					FontSize(11).TextColor(t.TextMuted)
 
 				ui.Divider(c)

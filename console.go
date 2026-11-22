@@ -135,6 +135,7 @@ func (a *app) topBar(c *ui.Context) {
 				ui.Button(c, a.ndiLabel()).OnClick(a.toggleNDI)
 			}
 		}
+		ui.Button(c, "Check for Updates").OnClick(a.checkForUpdates)
 		ui.Button(c, "Settings").Label("Settings").OnClick(a.showSettings)
 		ui.Button(c, "Sign out").OnClick(a.signOut)
 	})

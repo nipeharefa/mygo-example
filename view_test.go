@@ -2,7 +2,9 @@ package main
 
 import (
 	"testing"
+	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -373,5 +375,42 @@ func TestSettingsPageIgnoresDeckShortcuts(t *testing.T) {
 	tt.Key(0, ui.KeyRight)
 	if a.preview != before {
 		t.Fatalf("preview moved to %d on the Settings page", a.preview)
+	}
+}
+
+// Check for Updates has a button on the console, because the application menu
+// is macOS-only: a Windows install shows no menu bar at all.
+func TestCheckForUpdatesButtonOnTheConsole(t *testing.T) {
+	a, tt := signedInApp(t)
+	a.version = "0.2.0"
+	feed := newFeed(&mygo.Update{Version: "0.2.0"}, nil)
+	p := updaterFor(t, a, feed)
+
+	if !tt.HasText("Check for Updates") {
+		t.Fatalf("the console has no Check for Updates button: %q", tt.Texts())
+	}
+	if err := tt.Click("Check for Updates"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-feed.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the button never asked the feed")
+	}
+	if feed.calls != 1 {
+		t.Fatalf("checked %d times, want 1", feed.calls)
+	}
+	if got := p.dialogs(); len(got) != 1 {
+		t.Fatalf("asked %d dialogs, want 1", len(got))
+	}
+}
+
+// The help window carries the same button, for an operator who opens Help to
+// find out how to update.
+func TestHelpWindowOffersCheckForUpdates(t *testing.T) {
+	a := &app{}
+	tt := ui.NewTester(a.helpView, 640, 620)
+	if !tt.HasText("Check for Updates") {
+		t.Fatalf("the help window has no Check for Updates button: %q", tt.Texts())
 	}
 }

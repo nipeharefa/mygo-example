@@ -9,6 +9,10 @@ import (
 // buildMenu is the application menu. macOS gets the standard app, edit, help
 // and window menus around it; Windows and Linux get a File menu with Quit,
 // because a custom menu replaces the platform default.
+//
+// The Help menu does not carry Check for Updates, and the console has the
+// button instead: MyGo gives the Help menu role to macOS only, so Windows and
+// Linux would lose it.
 func buildMenu(a *app) *mygo.Menu {
 	settings := &mygo.MenuItem{
 		ID:          "settings",
@@ -20,11 +24,6 @@ func buildMenu(a *app) *mygo.Menu {
 		ID:    "help",
 		Label: "mygo-demo Help",
 		Click: func(*mygo.MenuItem, *mygo.Window) { a.openHelp() },
-	}
-	updates := &mygo.MenuItem{
-		ID:    "check-updates",
-		Label: "Check for Updates…",
-		Click: func(*mygo.MenuItem, *mygo.Window) { a.checkForUpdates() },
 	}
 	about := &mygo.MenuItem{
 		ID:    "about",
@@ -61,7 +60,7 @@ func buildMenu(a *app) *mygo.Menu {
 		},
 		&mygo.MenuItem{
 			Role:    mygo.RoleHelp,
-			Submenu: []*mygo.MenuItem{help, mygo.Separator(), updates, about},
+			Submenu: []*mygo.MenuItem{help, mygo.Separator(), about},
 		},
 	)
 	if runtime.GOOS == "darwin" {
