@@ -207,8 +207,8 @@ func (a *app) settingsBody(c *ui.Context) {
 					ui.Text(c, "The feed draws the slide itself, so it does not depend on the stage window or on a second monitor.").
 						FontSize(10).TextColor(t.TextMuted)
 				})
-				ui.Radio(c, &a.ndiResolution, ndiResolution720, "720p").OnChange(a.ndiResolutionChanged)
-				ui.Radio(c, &a.ndiResolution, ndiResolution1080, "1080p").OnChange(a.ndiResolutionChanged)
+				ui.Radio(c, &a.ndiResolution, ndiResolution720, "720p").OnChange(a.ndiResolutionChanged).Label("Stage output size: 720p")
+				ui.Radio(c, &a.ndiResolution, ndiResolution1080, "1080p").OnChange(a.ndiResolutionChanged).Label("Stage output size: 1080p")
 			})
 			a.ndiStatsSection(c)
 

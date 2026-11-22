@@ -208,6 +208,15 @@ func TestNDIResolutionPage(t *testing.T) {
 	if a.ndi != nil {
 		t.Fatal("changing the size started a source")
 	}
+	// Each radio is a clickable row of its own: both say what they set.
+	for _, want := range []string{"Stage output size: 720p", "Stage output size: 1080p"} {
+		if err := tt.Click(want); err != nil {
+			t.Fatalf("clicking %q: %v", want, err)
+		}
+	}
+	if a.ndiResolution != ndiResolution1080 {
+		t.Fatalf("clicking 1080p left the size at %d", a.ndiResolution)
+	}
 }
 
 func TestSettingsPageWithoutDisplays(t *testing.T) {
