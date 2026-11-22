@@ -31,8 +31,7 @@ func (s *ndiStream) snapshot() ndiStats { return ndiStats{} }
 func (s *ndiStream) Stop() {}
 
 // startNDISender is the safety net behind startNDI, which already returns
-// early on a build without a sender. The source the app would hand it is a
-// type only the platforms with a sender have, so it stands in its place.
-func startNDISender(newSource func(stop chan struct{}) interface{}, w, h int) (*ndiStream, error) {
+// early on a build without a sender.
+func startNDISender(a *app, w, h int) (*ndiStream, error) {
 	return nil, errors.New("NDI output is not supported on this platform")
 }

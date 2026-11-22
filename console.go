@@ -40,6 +40,12 @@ func (a *app) view(c *ui.Context) {
 		c.OnWindowShortcut(ui.Cmd, ui.KeyComma, a.showSettings)
 		c.OnWindowShortcut(ui.Ctrl, ui.KeyComma, a.showSettings)
 	}
+	// An open output waits for a turn of the main loop that is not this
+	// frame: asking for it here lets the loop show the console first (see
+	// settle and openOutput).
+	if a.openStage {
+		c.After(openStageDelay)
+	}
 	a.shell(c)
 	a.settle()
 }

@@ -67,12 +67,15 @@ type app struct {
 
 	// The stage: where it opens, where the open window went, and whether
 	// NDI publishes it.
-	stageDisplay     int64          // 0 = windowed on the console's screen
-	stageDisplayUsed int64          // display the open stage was placed on
-	ndiResolution    int            // frame size the feed publishes
-	drawWait         time.Duration  // a headless test's stand-in for the main thread
-	ndiOn            bool           // publish the stage when it opens
-	displays         []mygo.Display // refreshed at startup and on display changes
+	stageDisplay     int64         // 0 = windowed on the console's screen
+	stageDisplayUsed int64         // display the open stage was placed on
+	ndiResolution    int           // frame size the feed publishes
+	stop             chan struct{} // the stream's stop channel, while it runs
+	// drawNdi is how the feed draws a frame, which a test stands in for; the
+	// result is named because ndiFrame lives behind a build tag.
+	drawNdi  func(w, h int) (frame any, ok bool) // the frame the feed draws
+	ndiOn    bool                                // publish the stage when it opens
+	displays []mygo.Display                      // refreshed at startup and on display changes
 
 	// Preferences page. statsWanted is the view's request for a stats
 	// timer; statsOn says this frame wanted one.
@@ -149,11 +152,16 @@ func (a *app) requestStage() {
 	a.changed()
 }
 
-// settle applies what the frame asked for, once it has been built.
+// settle applies what the frame asked for, once it has been built. A stage
+// that has to be created is left to a later frame (view asks for one with
+// Context.After while openStage is set) so the console draws the frame it
+// asked for before a new window works takes the main thread.
 func (a *app) settle() {
 	if a.openStage {
 		a.openStage = false
-		if a.win != nil {
+		if a.win != nil && a.live == nil {
+			// An open stage is brought forward now: no window work
+			// remains that the event's own frame would wait for.
 			a.openOutput()
 		}
 	}
@@ -185,11 +193,13 @@ func (a *app) startNDI() error {
 		return nil
 	}
 	w, h := a.ndiFrameSize()
-	s, err := startNDISender(a.stageSourceFor, w, h)
+	s, err := startNDISender(a, w, h)
 	if err != nil {
 		a.ndiErr = err.Error()
 		return err
 	}
+	// The sender exists from here, and the stream draws its frames through
+	// a.drawNdiFrame, which runs on the main thread.
 	a.ndi, a.ndiErr = s, ""
 	return nil
 }
@@ -210,7 +220,10 @@ func (a *app) restartNDI() {
 		return
 	}
 	a.stopNDI()
-	_ = a.startNDI()
+	a.ndiErr = ""
+	if a.ndiOn {
+		_ = a.startNDI()
+	}
 }
 
 // stopNDI removes the source; it is safe when nothing is streaming.

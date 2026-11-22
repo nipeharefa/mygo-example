@@ -13,6 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/ebitengine/purego"
+	"github.com/egoist/mygo"
 )
 
 // The NDI runtime at runtime, shared by every platform that publishes the
@@ -192,7 +193,8 @@ type ndiFrame struct {
 	w, h   int
 }
 
-// ndiFrameSource draws one frame for the feed at the requested size.
+// ndiFrameSource draws one frame for the feed at the requested size, or
+// reports that this pass has none to send.
 type ndiFrameSource interface {
 	frame(w, h int) (ndiFrame, bool)
 }
@@ -201,7 +203,7 @@ type ndiFrameSource interface {
 type ndiStream struct {
 	rt   *ndiRuntime
 	send uintptr
-	src  ndiFrameSource
+	a    *app
 	w, h int
 	stop chan struct{}
 	done chan struct{}
@@ -281,11 +283,9 @@ var (
 	ndiRuntimeErr  error
 )
 
-// startNDISender opens the NDI runtime and starts sending frames of the
-// source at w×h. newSource builds that source from the stream's stop
-// channel, so it is called once the stream exists and can give up when the
-// stream stops.
-func startNDISender(newSource func(stop chan struct{}) ndiFrameSource, w, h int) (*ndiStream, error) {
+// startNDISender opens the NDI runtime and starts sending the app's frames
+// at w×h, one at a time, as an asynchronous sender asks.
+func startNDISender(a *app, w, h int) (*ndiStream, error) {
 	rt, err := loadNDI()
 	if err != nil {
 		return nil, err
@@ -302,7 +302,10 @@ func startNDISender(newSource func(stop chan struct{}) ndiFrameSource, w, h int)
 		return nil, ndiRuntimeErr
 	}
 	name := append([]byte(stageSourceName), 0)
-	settings := ndiSendCreate{name: &name[0], clockVideo: 1}
+	// Async output (clockVideo 0): the sender's own thread takes the frames
+	// and sends them, so sending never runs on the main loop and never waits
+	// for the consumer there. The frame loop draws when its turn comes.
+	settings := ndiSendCreate{name: &name[0]}
 	send := rt.sendCreate(&settings)
 	runtime.KeepAlive(name)
 	if send == 0 {
@@ -310,20 +313,100 @@ func startNDISender(newSource func(stop chan struct{}) ndiFrameSource, w, h int)
 		return nil, errors.New("the NDI runtime refused to create a sender")
 	}
 	s := &ndiStream{rt: rt, send: send, w: w, h: h, stop: make(chan struct{}), done: make(chan struct{})}
-	s.src = newSource(s.stop)
+	s.a = a
 	go s.run()
-	// The sender exists by now, so a source that cannot draw is a clear
-	// error instead of source discovery for a stream of nothing.
-	if _, ok := s.src.frame(w, h); !ok {
-		s.Stop()
-		return nil, errors.New(ndiCaptureFailure())
-	}
 	return s, nil
+}
+
+// drawNdiFrame draws the feed's next frame. The frame loop calls it from
+// its own goroutine, and it runs the draw on the main thread, where the
+// view may be built: w is the window that owns the loop, which carries the
+// message. ui.Render settles the console's frame before it draws, and a
+// frame mid-draw asks for another one, so a loop that started inside a
+// frame gets its picture on the next pass instead of waiting for this one.
+func (a *app) drawNdiFrame(w int, height int) (ndiFrame, bool) {
+	out := make(chan ndiFrame, 1)
+	stop := a.stop
+	mygo.RunOnMain(func() {
+		win := a.win
+		if win == nil || a.ndi == nil {
+			return
+		}
+		if f, ok := a.renderStageFrame(w, height); ok {
+			select {
+			case out <- f:
+			default:
+			}
+		}
+		win.Invalidate()
+	})
+	select {
+	case f := <-out:
+		return f, true
+	default:
+	}
+	if stop != nil {
+		select {
+		case <-stop:
+			return ndiFrame{}, false
+		default:
+		}
+	}
+	// The console has no frame of its own to answer with yet: it paints
+	// again in a moment, and the draw comes with that pass.
+	return ndiFrame{}, false
+}
+
+// frame reports the next picture for the feed at w×h, or false when the
+// draw has no frame for this pass, which the loop skips.
+func (a *app) frame(w, h int) (ndiFrame, bool) {
+	if draw := a.drawNdi; draw != nil {
+		frame, ok := draw(w, h)
+		if !ok {
+			return ndiFrame{}, false
+		}
+		return frame.(ndiFrame), true
+	}
+	if stop := a.stop; stop != nil {
+		select {
+		case <-stop:
+			return ndiFrame{}, false
+		default:
+		}
+	}
+	if a.win == nil {
+		// No main loop to draw on, which only a test does: draw here.
+		return a.renderStageFrame(w, h)
+	}
+	return a.drawNdiFrame(w, h)
+}
+
+// draw asks the source for one frame, or reports false as soon as the
+// stream stops. The draw runs on its own goroutine, so a frame waiting for
+// the main thread never keeps Stop waiting: the loop picks the stop channel
+// instead and drops the frame when it comes.
+func (s *ndiStream) draw(source ndiFrameSource) (ndiFrame, bool) {
+	type result struct {
+		frame ndiFrame
+		ok    bool
+	}
+	done := make(chan result, 1)
+	go func() {
+		f, ok := source.frame(s.w, s.h)
+		done <- result{f, ok}
+	}()
+	select {
+	case r := <-done:
+		return r.frame, r.ok
+	case <-s.stop:
+		return ndiFrame{}, false
+	}
 }
 
 // run draws and sends until Stop closes the stop channel.
 func (s *ndiStream) run() {
 	defer close(s.done)
+	var source ndiFrameSource = s.a
 	frame := ndiVideoFrame{
 		fourCC:          [4]byte{'B', 'G', 'R', 'A'},
 		frameRateN:      ndiFrameRate,
@@ -337,12 +420,12 @@ func (s *ndiStream) run() {
 			return
 		default:
 		}
-		shot, ok := s.src.frame(s.w, s.h)
+		shot, ok := s.draw(source)
 		if !ok {
 			s.skipped()
-			// Nothing to show right now (the stage is not rendering yet,
-			// or the main thread is busy); the consumer keeps the last
-			// frame.
+			// Nothing to show right now: the draw comes on the next frame
+			// the console builds, and the consumer keeps the last one
+			// until then.
 			select {
 			case <-s.stop:
 				return

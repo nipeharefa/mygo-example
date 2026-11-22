@@ -5,9 +5,7 @@ package main
 import (
 	"image"
 	"math"
-	"time"
 
-	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -187,85 +185,4 @@ func cropFrame(f ndiFrame, x, y, w, h int) ndiFrame {
 		copy(pix[row*4*w:(row+1)*4*w], f.pix[(y+row)*f.stride+x*4:(y+row)*f.stride+x*4+4*w])
 	}
 	return ndiFrame{pix: pix, stride: 4 * w, w: w, h: h}
-}
-
-// stageSourceFor adapts the stage to a stream's goroutine: the source draws
-// the slide that is on stage when a frame is asked for.
-func (a *app) stageSourceFor(stop chan struct{}) ndiFrameSource {
-	w, h := a.ndiFrameSize()
-	return newStageSource(a, w, h, stop)
-}
-
-// stageSource renders the stage for the frame loop: each call draws on the
-// main thread, hands the frame back, and gives up when the stream stops
-// first.
-type stageSource struct {
-	a    *app
-	w, h int
-	stop <-chan struct{}
-}
-
-// newStageSource builds the source a stream draws with, carrying the
-// stream's stop channel: the stream is never waiting on the main thread
-// once Stop closes that channel.
-func newStageSource(a *app, w, h int, stop chan struct{}) *stageSource {
-	return &stageSource{a: a, w: w, h: h, stop: stop}
-}
-
-// frame draws one frame on the main thread and waits for it, up to stop.
-//
-// mygo.RunOnMain runs the function inline when the caller is the main
-// thread, which is the startup preflight in startNDISender, and drops it
-// once the event loop has shut down. Otherwise it waits for the loop, which
-// a headless test never runs. So the draw runs inline until a console window
-// exists: nothing is on screen before App.WhenReady, and a.win is set on the
-// main thread only. Afterwards a helper goroutine posts the draw and waits,
-// and the frame loop selects on that frame or on stop, so Stop never waits
-// on a render and a frame cannot outlive the stream. A draw that already
-// started when Stop closed waits for nothing but the main thread, and its
-// frame is dropped: stop is checked again once the draw returns.
-func (s *stageSource) frame(w, h int) (ndiFrame, bool) {
-	if stopped(s.stop) {
-		return ndiFrame{}, false
-	}
-	if s.a.win == nil {
-		if wait := s.a.drawWait; wait > 0 {
-			time.Sleep(wait)
-		}
-		f, ok := s.a.renderStageFrame(w, h)
-		if !ok || stopped(s.stop) {
-			return ndiFrame{}, false
-		}
-		return f, true
-	}
-	out := make(chan ndiFrame, 1)
-	go func() {
-		mygo.RunOnMain(func() {
-			if stopped(s.stop) {
-				return
-			}
-			if f, ok := s.a.renderStageFrame(w, h); ok && !stopped(s.stop) {
-				select {
-				case out <- f:
-				default:
-				}
-			}
-		})
-	}()
-	select {
-	case f := <-out:
-		return f, true
-	case <-s.stop:
-		return ndiFrame{}, false
-	}
-}
-
-// stopped reports whether the stream has stopped.
-func stopped(stop <-chan struct{}) bool {
-	select {
-	case <-stop:
-		return true
-	default:
-		return false
-	}
 }

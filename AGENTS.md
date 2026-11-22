@@ -54,11 +54,14 @@ identity rules live in
   at 1280×720 (`ndiStageWidth`/`ndiStageHeight`) and drawn at the scale the
   frame needs, so a larger or oddly shaped frame is the whole slide made
   bigger, then averaged down; `shrinkFrame` must never take its crop path
-  for a size `ndiRenderSize` allows. The frame loop selects on the stream's
-  stop channel while a helper goroutine posts the draw: `mygo.RunOnMain`
-  blocks its caller until the loop runs the function, so the loop must not
-  be the one waiting on it, and the posted closure re-checks `stopped`
-  before and after drawing so no frame outlives the stream.
+  for a size `ndiRenderSize` allows. The sender is asynchronous
+  (`clockVideo` 0), so sending runs on the NDI thread, never on the main
+  loop. The app is the frame source (`(*app) frame`). That loop cannot draw
+  itself: `drawNdiFrame` posts the render with `mygo.RunOnMain` and asks the
+  console to paint, and the picture arrives in the pass that follows, so a
+  draw that would have to wait for the very pass that asked for it is
+  simply skipped. `ndiStream.draw` runs the source on a helper goroutine and
+  selects on the stream's stop channel, so Stop never waits for a draw.
 - **The monitor never reaches the room by itself.**
   `selectSlide`/`nextSlide`/`prevSlide` move `a.preview`; only
   `takeSlide` (Go Live, Enter on the list, Cmd/Ctrl+Enter) and the stage
@@ -82,14 +85,20 @@ identity rules live in
   `main.go`; no session, no hashing, no network. Sign-in and sign-out
   mutate `app` from callbacks, never from inside the build pass. Sign-out
   closes the output and stops NDI.
-- **Windows come from main-thread callbacks, and tests never open one.**
-  `mygo.NewWindow` is called only through `a.newWindow`, from `openOutput`
-  and `openHelp` after `WhenReady`, never from the build pass and never
-  from a test, because a headless `ui.Tester` has no application. The
-  console asks for the stage with `requestStage` and `settle` opens it after
-  the frame is built. Tests inject `a.newWindow`/`a.mainScreen` or leave
-  them alone; either way they never call one. `buildMenu` is headless-safe
-  and its structure is tested; its click callbacks are not.
+- **Windows are created outside the event that asks for them, and tests
+  never open one.** `mygo.NewWindow` is called only through `a.newWindow`,
+  from `openOutput` and `openHelp` after `WhenReady`, never from the build
+  pass and never from a test, because a headless `ui.Tester` has no
+  application. The console asks for the stage with `requestStage`;
+  `settle()` turns that into `a.openStage`, and `view` asks for a later
+  pass (`c.After(openStageDelay)`), so `openOutput` runs in a frame that no
+  event is waiting on. That is what keeps Open output from hanging: creating
+  and showing a window inside the click, and then placing it with
+  `SetPosition`/`SetFullScreen`, waited on a window that was not on screen
+  yet. Never call a `mygo.Window` method from inside the build pass either;
+  ask for another pass instead. Tests inject `a.newWindow`/`a.mainScreen`
+  or leave them alone; either way they never call one. `buildMenu` is
+  headless-safe and its structure is tested; its click callbacks are not.
 - **The stage opens once.** `openOutput` places it from a display
   (`stageDisplayFound`) or keeps it windowed, and `placeStage` re-asserts
   that on enter-fullscreen. Only an explicit action (Open output, picking a
@@ -109,14 +118,15 @@ identity rules live in
   `ndi_sender.go` (`//go:build darwin || linux || windows`) owns the
   library-facing half — runtime discovery, binding, sender lifecycle, the
   frame loop — for every platform. Frames come from an `ndiFrameSource`, not
-  from a window: `ndi_render.go` is the only source, and `(*app)
-  stageSourceFor` picks it. Each platform file supplies only the
+  from a window: the app is the only source (`(*app) frame`), and
+  `ndi_render.go` draws its frames. Each platform file supplies only the
   dynamic-library calls: `ndi_darwin.go` uses `purego`, `ndi_windows.go`
   uses `syscall`, `ndi_linux.go` uses `purego`. No cgo, no SDK headers, no
   third-party NDI package. `ndi_other.go` and `ndi_render_stub.go` are the
   stubs for the remaining systems and are the only files with
   `ndiSupported() == false`; keep `GOOS=freebsd CGO_ENABLED=0 go build ./...`
-  compiling, which is what `stageSourceFor`'s stub is for.
+  compiling, and keep the headless files free of `ndiFrame` by name: the
+  test seam `a.drawNdi` returns `any` for that reason.
   `ndi_windows_test.go` pins the struct offsets the C ABI requires;
   `ndi_sender_test.go` pins the versioned table's indices against a real
   runtime. Run `GOOS=windows go vet ./...` and
@@ -142,6 +152,7 @@ test -z "$(gofmt -l *.go)"       # CI formatting gate
 CGO_ENABLED=0 go test ./...      # view, deck and output tests, headless via ui.NewTester
 go run .                         # opens the console for a manual check
 MYGO_NDI=1 go run .              # ...and publishes the stage over NDI
+go build -tags e2e -o demo .     # adds the automation socket (automation_e2e.go)
 bun run build                    # packages the app into build/
 bun run build -- -platform darwin/arm64,darwin/amd64
 git tag -a v0.2.0-beta.1 -m "..." && git push origin v0.2.0-beta.1   # publishes a release
@@ -185,8 +196,9 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `ndi_windows_test.go` | Pins the offsets of `ndiVideoFrame`/`ndiSendCreate` to what the C ABI declares; runs on the Windows CI job. |
 | `ndi_linux.go` | The `purego` dynamic-library calls into the NDI library. No capture, no window handle. |
 | `ndi_other.go` | The stub for every remaining system: `ndiSupported() == false`, a no-op stream and a sender that always fails. |
-| `ndi_render.go` | The feed's only frame source: `renderFrame` (RGBA to BGRA), `ndiFrameSize`/`ndiRenderSize` (the HD cap), `renderStageFrame` (the `ui.Render` draw), `shrinkFrame`, and `stageSource` with its main-thread handoff. |
-| `ndi_render_stub.go` | The same size functions and `stageSourceFor` for the builds without a sender, so `main.go` compiles everywhere. |
+| `ndi_render.go` | The feed's draw: `renderFrame` (RGBA to BGRA), `ndiFrameSize`/`ndiRenderSize` (the HD cap), `renderStageFrame` (the `ui.Render` draw) and `shrinkFrame`. The main-thread handoff lives with the sender, in `drawNdiFrame`. |
+| `ndi_render_stub.go` | The same size functions for the builds without a sender, so `main.go` compiles everywhere. |
+| `automation_e2e.go` | The `e2e`-tagged import of the MyGo automation plugin, so a built app can be driven over `MYGO_AUTOMATION`; no release build has it. |
 | `ndi_source_test.go` | The rendered feed: BGRA order, the size cap, the whole slide at odd and large sizes, a blacked-out frame, following the stage, and Stop not waiting on a draw. |
 | `README.md` | What a downloader needs: installers, the demo account, running a service, shortcuts, and the per-platform NDI instructions (the runtime, not a window, is what NDI needs). |
 | `mygo.config.ts` | Packaging: name, identifier, version, output directory. `devUrl`, `devCommand`, `buildCommand` and `frontendDist` are inert for a native view. |

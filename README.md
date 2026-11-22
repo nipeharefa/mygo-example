@@ -148,8 +148,21 @@ CGO_ENABLED=0 go build ./...   # the app, no cgo anywhere
 CGO_ENABLED=0 go test ./...    # headless view tests
 go run .                       # opens the console
 MYGO_NDI=1 go run .            # ...and publishes the stage over NDI
+go build -tags e2e -o demo .   # adds the automation socket for driving it (below)
 bun run build                  # packaged installers in build/
 ```
+
+The `e2e` tag adds the MyGo automation plugin, so a script can drive the
+built app from outside:
+
+```sh
+go build -tags e2e -o demo . && MYGO_AUTOMATION=/tmp/demo.sock ./demo
+# another shell: send newline-delimited JSON to the socket
+# {"id":1,"method":"windows"}   then   {"id":2,"method":"capture","params":{"window":1}}
+```
+
+It listens only when `MYGO_AUTOMATION` names a socket, and no release build
+includes it.
 
 A `v*` tag builds every platform and publishes a release; the tag's base
 version must match `version` in `mygo.config.ts`. See

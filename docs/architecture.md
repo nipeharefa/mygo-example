@@ -164,8 +164,13 @@ shortcuts are → ↓ Space next, ← ↑ prev, B blackout, and Esc, which clear
 fullscreen when `a.live.IsFullScreen()` and closes the output otherwise —
 the only way out of a window with no title bar.
 
-`openOutput` when a window already exists just calls `Show()` and
-`Focus()`. `shutStage` nils `a.live` first and invalidates the console;
+`openOutput` runs from a frame that no event waits on: `requestStage` sets
+`a.openStage`, `settle()` hands it to the next pass through
+`c.After(openStageDelay)`, and `openOutput` then creates the window. Creating
+and showing a window inside the click that asked for it, and then placing it
+with `SetPosition`/`SetFullScreen`, left the main thread stuck on a window
+that had not been drawn yet — Open output looked like "not responding". With
+a window already open, `openOutput` just calls `Show()` and `Focus()`. `shutStage` nils `a.live` first and invalidates the console;
 `OnClosed` calls it guarded with `if a.live != live { return }`, so a late
 close event cannot clear a window that was reopened meanwhile. Nilling
 before `Close()` matters: a `Close()` whose `OnClosed` guard is already
@@ -174,10 +179,13 @@ satisfied never reaches the backend's `destroy()`. `closeOutput` =
 only: NDI does not start with it and does not stop with it (see "NDI
 output"), so a feed can run with no stage window at all.
 
-The stage opens once and stays there. Nothing reopens it from a display
-notification: `refreshDisplays` saves a preference whose display went away
-and only closes and reopens the stage when `stageDisplayUsed` itself is
-gone. That is what used to loop — a recreated fullscreen window posted
+The stage opens once and stays there. `placeStage` is idempotent: it moves
+and goes fullscreen only when the place actually changed, and calls
+`SetFullScreen(false)` only on a window that reports fullscreen, so carrying
+it to a display never toggles AppKit twice. Nothing reopens it from a display
+notification: `refreshDisplays` saves a preference whose display went away,
+and when `stageDisplayUsed` itself is gone it closes the stage and asks for a
+new one (`requestStage`), so the window is created in a later frame. That is what used to loop — a recreated fullscreen window posted
 another display change from inside `openOutput`.
 
 ### Settings
@@ -223,15 +231,21 @@ looks at `a.live`.
 
 The frame path, in three layers:
 
-- `startNDISender(a.stageSourceFor, w, h)` builds the sender, asks
-  `stageSourceFor` for an `ndiFrameSource` bound to the stream's stop
-  channel, and pulls the first frame before it reports success — a source
-  that cannot draw is an error for the caller, not a silent stream.
-- `stageSource.frame(w, h)` runs in the sender's frame loop. It hands the
-  draw to the main thread with `mygo.RunOnMain` from a helper goroutine and
-  selects on the stream's stop channel, so **Stop never waits for a draw**:
-  `mygo.RunOnMain` blocks its caller until the loop runs the function, and
-  a frame loop waiting on that would deadlock its own Stop.
+- `startNDISender(a, w, h)` creates an **asynchronous** sender
+  (`clockVideo` 0): the NDI thread takes the frames and sends them, so sending
+  never runs on the main loop and never waits for a consumer there. The app
+  itself is the `ndiFrameSource` (`(*app) frame`), and nothing is drawn
+  inside the create call.
+- `ndiStream.draw` runs the source on a helper goroutine and selects on the
+  stream's stop channel, so **Stop never waits for a draw**:
+  `mygo.RunOnMain` blocks its caller until the loop runs the function, and a
+  frame loop waiting on that would deadlock its own Stop.
+- `(*app) frame` skips the draw once the stream stopped, draws inline in a
+  headless process (`a.win == nil`), and otherwise posts `drawNdiFrame`:
+  the draw runs on the main thread, then `win.Invalidate()` asks the console
+  for another pass, and the picture goes out with that pass. A draw that
+  would have to wait for the very pass that asked for it is skipped rather
+  than blocking — the loop is asynchronous, so a missed frame costs nothing.
 - `renderStageFrame` draws `a.liveView` at a fixed 1280×720 layout
   (`ndiStageWidth`/`ndiStageHeight`) with a scale that covers the requested
   frame, then `shrinkFrame` averages it down to the frame size. The stage

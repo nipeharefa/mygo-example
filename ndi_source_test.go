@@ -5,6 +5,7 @@ package main
 import (
 	"image"
 	"image/color"
+	"runtime"
 	"testing"
 	"time"
 
@@ -54,22 +55,15 @@ func TestNDIRenderSize(t *testing.T) {
 	}
 }
 
-// A frame waiting on the main thread must not outlive Stop: the loop
-// selects on the stream's stop channel, so a source that never answers
-// still lets the stream end.
-type stuck struct{ stop chan struct{} }
-
-func (s stuck) frame(w, h int) (ndiFrame, bool) {
-	<-s.stop
-	return ndiFrame{}, false
-}
+// A draw that never answers must not keep the stream alive: the loop waits
+// for a frame or for the stop, whichever comes first.
 
 // Review Focus 3: stopping while a frame is in flight. The stream here has
 // no runtime and no sender, which also pins that a source reporting false
 // never reaches s.rt or s.send.
 func TestStreamStopsWithAStuckSource(t *testing.T) {
-	s := &ndiStream{stop: make(chan struct{}), done: make(chan struct{})}
-	s.src = stuck{s.stop}
+	app := newApp()
+	s := &ndiStream{a: app, stop: make(chan struct{}), done: make(chan struct{})}
 	go s.run()
 	close(s.stop)
 	select {
@@ -85,9 +79,8 @@ func TestRenderStageFrameFollowsTheStage(t *testing.T) {
 	a := newApp()
 	a.addSong("amazing-grace")
 	a.addVerse("psalm23-1")
-	src := newStageSource(a, 640, 360, make(chan struct{}))
 
-	first, ok := src.frame(640, 360)
+	first, ok := a.frame(640, 360)
 	if !ok {
 		t.Fatal("the source gave no frame")
 	}
@@ -107,7 +100,7 @@ func TestRenderStageFrameFollowsTheStage(t *testing.T) {
 	// Blacked out, the frame is the stage's background and nothing else:
 	// no slide, no text.
 	a.blackout = true
-	empty, ok := src.frame(640, 360)
+	empty, ok := a.frame(640, 360)
 	if !ok {
 		t.Fatal("the blackout frame gave no frame")
 	}
@@ -122,13 +115,12 @@ func TestRenderStageFrameTracksTheStage(t *testing.T) {
 	a := newApp()
 	a.addSong("amazing-grace")
 	a.addVerse("psalm23-1")
-	src := newStageSource(a, 320, 180, make(chan struct{}))
-	before, ok := src.frame(320, 180)
+	before, ok := a.frame(320, 180)
 	if !ok {
 		t.Fatal("no first frame")
 	}
 	a.nextStage()
-	after, ok := src.frame(320, 180)
+	after, ok := a.frame(320, 180)
 	if !ok {
 		t.Fatal("no second frame")
 	}
@@ -137,12 +129,12 @@ func TestRenderStageFrameTracksTheStage(t *testing.T) {
 	}
 	for _, size := range [][2]int{{320, 180}, {1920, 1080}} {
 		a.blackout = true
-		black, ok := src.frame(size[0], size[1])
+		black, ok := a.frame(size[0], size[1])
 		if !ok || !isOneColour(black.pix) {
 			t.Fatalf("blackout must render a dark empty frame at %dx%d", size[0], size[1])
 		}
 		a.blackout = false
-		lit, ok := src.frame(size[0], size[1])
+		lit, ok := a.frame(size[0], size[1])
 		if !ok || isOneColour(lit.pix) {
 			t.Fatalf("clearing the blackout must restore the slide at %dx%d", size[0], size[1])
 		}
@@ -152,20 +144,23 @@ func TestRenderStageFrameTracksTheStage(t *testing.T) {
 	}
 }
 
-// Review Focus 3, for the render source: a frame waiting on the main thread
-// must not outlive Stop. With the loop shut down RunOnMain drops the
-// render, so the source has to answer from the stop channel.
-func TestStageSourceGivesUpWhenStopped(t *testing.T) {
+// A draw raised while the stream stops is skipped: the frame loop asks for
+// a frame, the stop closes the stream, and the frame comes back empty
+// instead of waiting for the console to build it.
+func TestFrameAfterStopIsSkipped(t *testing.T) {
 	a := newApp()
 	a.addSong("amazing-grace")
 	a.addVerse("psalm23-1")
+	// A window's pointer is enough: nothing dereferences it, and
+	// mygo.NewWindow needs a running application.
+	a.win = new(mygo.Window)
 	stop := make(chan struct{})
-	src := newStageSource(a, 320, 180, stop)
+	a.stop = stop
 	close(stop)
 
 	done := make(chan bool, 1)
 	go func() {
-		_, ok := src.frame(320, 180)
+		_, ok := a.frame(320, 180)
 		done <- ok
 	}()
 	select {
@@ -184,8 +179,7 @@ func TestRenderStageFrameFillsALargerFrame(t *testing.T) {
 	a := newApp()
 	a.addSong("amazing-grace")
 	a.addVerse("psalm23-1")
-	src := newStageSource(a, 2560, 1080, make(chan struct{}))
-	f, ok := src.frame(2560, 1080)
+	f, ok := a.frame(2560, 1080)
 	if !ok {
 		t.Fatal("no frame")
 	}
@@ -205,7 +199,7 @@ func TestRenderStageFrameFitsAnOddLargerFrame(t *testing.T) {
 	a.addSong("amazing-grace")
 	a.addVerse("psalm23-1")
 	for _, size := range [][2]int{{1600, 720}, {1920, 810}, {1920, 1000}} {
-		f, ok := newStageSource(a, size[0], size[1], make(chan struct{})).frame(size[0], size[1])
+		f, ok := a.frame(size[0], size[1])
 		if !ok {
 			t.Fatalf("no frame at %dx%d", size[0], size[1])
 		}
@@ -218,36 +212,53 @@ func TestRenderStageFrameFitsAnOddLargerFrame(t *testing.T) {
 	}
 }
 
-// Review Focus 3, in flight: Stop closes while a draw waits for the main
-// thread, and the frame loop must return without waiting for that draw.
-func TestStageSourceStopDoesNotWaitForADraw(t *testing.T) {
-	const wait = 40 * time.Millisecond
+// Review Focus 3, in flight: Stop closes while the loop waits on a draw,
+// and the loop must return without waiting for that draw to finish.
+func TestStreamStopDoesNotWaitForADraw(t *testing.T) {
+	const drawTime = 400 * time.Millisecond
 	a := newApp()
-	a.addSong("amazing-grace")
-	a.addVerse("psalm23-1")
-	// A window's pointer is enough: nothing dereferences it here, and
-	// mygo.NewWindow needs a running application.
-	a.win = new(mygo.Window)
-	// A draw that needs the main thread takes at least this long to come
-	// back: the loop below is not running.
-	a.drawWait = wait
-	stop := make(chan struct{})
-	src := newStageSource(a, 320, 180, stop)
-
-	got := make(chan bool, 1)
-	go func() {
-		_, ok := src.frame(320, 180)
-		got <- ok
-	}()
-	time.Sleep(wait / 4)
-	close(stop)
+	inDraw := make(chan struct{}, 1)
+	// The draw blocks on its own channel, so the first frame is in flight
+	// when Stop closes the stream; a sleep would only say the wake-up
+	// arrived half a draw late, which says nothing about Stop.
+	// Every draw blocks on this channel, and it is closed once to release
+	// each of them.
+	unblock := make(chan struct{})
+	a.drawNdi = func(w, h int) (any, bool) {
+		inDraw <- struct{}{}
+		<-unblock
+		return nil, false
+	}
+	s := &ndiStream{
+		rt: &ndiRuntime{sendVideo: func(uintptr, *ndiVideoFrame) {}},
+		a:  a, stop: make(chan struct{}), done: make(chan struct{}),
+	}
+	go s.run()
+	// The loop is inside the draw now, which is the case: a frame in flight
+	// when the stream stops.
+	<-inDraw
+	close(unblock)
+	<-inDraw
+	start := time.Now()
+	close(s.stop)
 	select {
-	case ok := <-got:
-		if ok {
-			t.Fatal("a stopped source returned a frame")
+	case <-s.done:
+	case <-time.After(2 * time.Second):
+		buf := make([]byte, 1<<18)
+		n := runtime.Stack(buf, true)
+		t.Fatalf("Stop waited for the draw in flight\n%s", buf[:n])
+	}
+	go func() {
+		for {
+			select {
+			case <-unblock:
+			case <-time.After(time.Second):
+				return
+			}
 		}
-	case <-time.After(wait / 2):
-		t.Fatal("Stop waited for the draw in flight")
+	}()
+	if took := time.Since(start); took > 100*time.Millisecond {
+		t.Fatalf("the loop took %v to end after Stop", took)
 	}
 }
 
@@ -297,33 +308,29 @@ func TestRenderFrameSwapsColourAndKeepsAlpha(t *testing.T) {
 	}
 }
 
-// Stop cuts a draw short once the event loop holds it: with a real window
-// the draw is posted to the main thread, which is not running here, so the
-// source gives up on the stop channel and never waits for the post.
-func TestStageSourceStopCutsAPostedDraw(t *testing.T) {
+// A frame in flight: the frame loop stops while the draw waits on the main
+// thread, and the loop ends on the stop channel instead of waiting for it.
+func TestFrameStopCutsAPostedDraw(t *testing.T) {
 	a := newApp()
-	a.addSong("amazing-grace")
-	// A window's pointer is enough: nothing dereferences it here, and
-	// mygo.NewWindow needs a running application.
-	a.win = new(mygo.Window)
-	stop := make(chan struct{})
-	src := newStageSource(a, 320, 180, stop)
-
-	done := make(chan bool, 1)
-	go func() {
-		_, ok := src.frame(320, 180)
-		done <- ok
-	}()
-	// The draw is posted by now; Stop closes the channel the frame select
-	// is waiting on.
-	time.Sleep(20 * time.Millisecond)
-	close(stop)
-	select {
-	case ok := <-done:
-		if ok {
-			t.Fatal("a stopped source returned a posted frame")
+	posted := make(chan struct{}, 1)
+	a.drawNdi = func(w, h int) (any, bool) {
+		select {
+		case posted <- struct{}{}:
+		default:
 		}
+		time.Sleep(time.Hour)
+		return nil, false
+	}
+	s := &ndiStream{
+		rt: &ndiRuntime{sendVideo: func(uintptr, *ndiVideoFrame) {}},
+		a:  a, stop: make(chan struct{}), done: make(chan struct{}),
+	}
+	go s.run()
+	<-posted
+	close(s.stop)
+	select {
+	case <-s.done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("a stopped source is still waiting for the posted draw")
+		t.Fatal("the loop waited for the draw in flight")
 	}
 }

@@ -262,12 +262,13 @@ func settingsHeading(c *ui.Context, label string) {
 }
 
 // stageDisplayChanged runs when a display radio is picked: the preference is
-// saved and an open stage moves to the new display.
+// saved and an open stage moves to the new display. The stage is never
+// recreated for it: placeStage moves a window that is already open, and a
+// fullscreen window never reports the size a new one would ask for.
 func (a *app) stageDisplayChanged() {
 	a.saveSettings()
 	if a.live != nil {
-		a.closeOutput()
-		a.openOutput()
+		a.bringStageForward()
 		return
 	}
 	a.changed()
@@ -364,8 +365,11 @@ func (a *app) refreshDisplays(displays []mygo.Display) {
 		return
 	}
 	if a.stageDisplayUsed != 0 && !a.hasDisplay(a.stageDisplayUsed) {
+		// The display the stage was full screened on is gone: drop the
+		// window and ask for a new one on a later frame, as the console
+		// does, so this notification returns without window work.
 		a.closeOutput()
-		a.openOutput()
+		a.requestStage()
 		return
 	}
 	a.changed()
