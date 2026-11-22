@@ -12,4 +12,8 @@ export default defineConfig({
   frontendDist: "dist",
   bindings: "src/mygo.ts",
   out: "build",
+  updates: {
+    publicKey: "HLP9gmMHiUxcfeEsEdjk9OSqiu2HQlDnLB8FQSw3tXw=",
+    github: "nipeharefa/mygo-example",
+  },
 });
