@@ -275,6 +275,12 @@ func (s *ndiStream) failed(err error) {
 	s.lastErr = err.Error()
 }
 
+// ndiRuntimeOnce initializes the loaded NDI library once for the process.
+var (
+	ndiRuntimeOnce sync.Once
+	ndiRuntimeErr  error
+)
+
 // startNDISender opens the NDI runtime and starts sending frames of the
 // source at w×h. newSource builds that source from the stream's stop
 // channel, so it is called once the stream exists and can give up when the
@@ -284,17 +290,23 @@ func startNDISender(newSource func(stop chan struct{}) ndiFrameSource, w, h int)
 	if err != nil {
 		return nil, err
 	}
-	ok := rt.initialize()
-	if !ok {
-		rt.close()
-		return nil, errors.New("the NDI runtime failed to initialize")
+	// The library stays loaded and initialized for the process, which is
+	// what Processing.NDI.Lib.h asks a dynamic-loading host to do; Stop
+	// removes the source, not the library.
+	ndiRuntimeOnce.Do(func() {
+		if !rt.initialize() {
+			ndiRuntimeErr = errors.New("the NDI runtime failed to initialize")
+		}
+	})
+	if ndiRuntimeErr != nil {
+		return nil, ndiRuntimeErr
 	}
 	name := append([]byte(stageSourceName), 0)
 	settings := ndiSendCreate{name: &name[0], clockVideo: 1}
 	send := rt.sendCreate(&settings)
 	runtime.KeepAlive(name)
 	if send == 0 {
-		rt.close()
+		// The library stays loaded: it was initialized for the process.
 		return nil, errors.New("the NDI runtime refused to create a sender")
 	}
 	s := &ndiStream{rt: rt, send: send, w: w, h: h, stop: make(chan struct{}), done: make(chan struct{})}
