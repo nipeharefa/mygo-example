@@ -159,7 +159,12 @@ git tag -a v0.2.0-beta.1 -m "..." && git push origin v0.2.0-beta.1   # publishes
 ```
 
 A `v*` tag runs the full gate and packaging matrix, then attaches the
-installers to a GitHub release. The tag's base version must match
+installers to a GitHub release. The build signs update archives and
+`update-<platform>.json` manifests with `MYGO_UPDATER_PRIVATE_KEY` (the
+repository secret), which is the private half of `updates.publicKey` in
+`mygo.config.ts`; without the secret the release job fails rather than ship
+installers nothing can update. Keep the key private: installed apps accept
+only updates signed with it. The tag's base version must match
 `version` in `mygo.config.ts`, and a hyphen (`v0.2.0-beta.1`) publishes a
 prerelease.
 

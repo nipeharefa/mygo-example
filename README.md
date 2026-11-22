@@ -164,7 +164,10 @@ go build -tags e2e -o demo . && MYGO_AUTOMATION=/tmp/demo.sock ./demo
 It listens only when `MYGO_AUTOMATION` names a socket, and no release build
 includes it.
 
-A `v*` tag builds every platform and publishes a release; the tag's base
-version must match `version` in `mygo.config.ts`. See
+A `v*` tag builds every platform, signs the update archives against
+`updates.publicKey` and publishes the release; the tag's base version must
+match `version` in `mygo.config.ts`, and the repository needs the
+`MYGO_UPDATER_PRIVATE_KEY` secret (`gh secret set MYGO_UPDATER_PRIVATE_KEY <
+mygo-update.key`) or the release job refuses to publish. See
 [AGENTS.md](AGENTS.md) for the conventions and
 [docs/architecture.md](docs/architecture.md) for how the UI works.

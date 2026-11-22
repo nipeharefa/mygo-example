@@ -94,6 +94,11 @@ jobs:
         if: matrix.name == 'Windows'
         run: sudo apt-get update && sudo apt-get install -y nsis
       - name: Build the apps
+        env:
+          # Signs the update manifests and archives; without it the build
+          # skips them, and installed apps would have nothing to update to.
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
         run: bun run build -- -platform "${{ matrix.platform }}"
       # Artifacts expire with the run; a v* tag also turns them into a
       # release, in the job below.
@@ -107,10 +112,15 @@ jobs:
             build/*/*-setup-*.exe
             build/*/*.deb
             build/*/*.tar.gz
+            build/*/*.delta
+            build/*/update-*.json
 
   release:
     name: Release
     needs: build
+    # Every tag: a stable tag is the latest release, so only it may publish
+    # without --prerelease. A tag without the key makes no updates at all,
+    # and this job says so instead of shipping installers that cannot update.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -132,6 +142,12 @@ jobs:
       - uses: actions/download-artifact@v7
         with:
           path: dist
+      - name: Check that the updates were signed
+        run: |
+          if [ -z "$(find dist -name 'update-*.json' -print -quit)" ]; then
+            echo "no update-*.json in the artifacts: MYGO_UPDATER_PRIVATE_KEY is unset"
+            exit 1
+          fi
       - name: List the assets
         run: find dist -type f | sort
       # Tags with a hyphen, such as v0.1.0-beta.1, publish as prereleases.
@@ -150,6 +166,8 @@ jobs:
             gh release upload "$tag" "${files[@]}" --clobber
             exit 0
           fi
+          # A stable tag becomes the latest release, whose manifests every
+          # installed app checks; a hyphenated one stays a prerelease.
           extra=()
           case "$tag" in *-*) extra+=(--prerelease) ;; esac
           gh release create "$tag" "${files[@]}" --title "$tag" --generate-notes "${extra[@]}"
