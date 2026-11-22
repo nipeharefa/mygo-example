@@ -296,3 +296,34 @@ func TestRenderFrameSwapsColourAndKeepsAlpha(t *testing.T) {
 		t.Fatalf("frame = %v, want BGRA %v", f.pix, want)
 	}
 }
+
+// Stop cuts a draw short once the event loop holds it: with a real window
+// the draw is posted to the main thread, which is not running here, so the
+// source gives up on the stop channel and never waits for the post.
+func TestStageSourceStopCutsAPostedDraw(t *testing.T) {
+	a := newApp()
+	a.addSong("amazing-grace")
+	// A window's pointer is enough: nothing dereferences it here, and
+	// mygo.NewWindow needs a running application.
+	a.win = new(mygo.Window)
+	stop := make(chan struct{})
+	src := newStageSource(a, 320, 180, stop)
+
+	done := make(chan bool, 1)
+	go func() {
+		_, ok := src.frame(320, 180)
+		done <- ok
+	}()
+	// The draw is posted by now; Stop closes the channel the frame select
+	// is waiting on.
+	time.Sleep(20 * time.Millisecond)
+	close(stop)
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("a stopped source returned a posted frame")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a stopped source is still waiting for the posted draw")
+	}
+}
