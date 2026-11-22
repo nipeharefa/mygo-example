@@ -21,6 +21,11 @@ func buildMenu(a *app) *mygo.Menu {
 		Label: "mygo-demo Help",
 		Click: func(*mygo.MenuItem, *mygo.Window) { a.openHelp() },
 	}
+	updates := &mygo.MenuItem{
+		ID:    "check-updates",
+		Label: "Check for Updates…",
+		Click: func(*mygo.MenuItem, *mygo.Window) { a.checkForUpdates() },
+	}
 	about := &mygo.MenuItem{
 		ID:    "about",
 		Label: "About mygo-demo",
@@ -56,7 +61,7 @@ func buildMenu(a *app) *mygo.Menu {
 		},
 		&mygo.MenuItem{
 			Role:    mygo.RoleHelp,
-			Submenu: []*mygo.MenuItem{help, mygo.Separator(), about},
+			Submenu: []*mygo.MenuItem{help, mygo.Separator(), updates, about},
 		},
 	)
 	if runtime.GOOS == "darwin" {

@@ -68,6 +68,13 @@ does not stop NDI, so a feed can keep running with no stage window at all.
 The display and NDI preferences are saved between runs; the run of show is
 not. A saved display that is no longer attached falls back to a window.
 
+**Help → Check for Updates…** asks GitHub for the newest release and offers
+to install it; the app then restarts on the new version. Updates work only
+for the installers from a release — a development build, or an install a
+package manager owns (such as the `.deb`), is updated another way. Every
+release on GitHub carries per-platform update archives that are signed with
+the project's key, so an app accepts only updates it can verify.
+
 ## The live output as an NDI source
 
 The stage can publish itself as an NDI source on macOS, Windows and Linux.

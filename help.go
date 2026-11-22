@@ -64,6 +64,8 @@ func (a *app) helpView(c *ui.Context) {
 				ui.Text(c, "A simple worship presenter: build a run of show from the library, keep the next slide on the monitor, and send the stage to the room and to NDI.").
 					FontSize(11).TextColor(t.TextMuted)
 				ui.Text(c, "Demo account: "+demoUsername+" / "+demoPassword).FontSize(11).TextColor(t.TextMuted).SingleLine()
+				ui.Text(c, "Help → Check for Updates… reads the latest release; only the installers from a release can update themselves.").
+					FontSize(11).TextColor(t.TextMuted)
 
 				ui.Divider(c)
 				helpSection(c, "Keyboard")
@@ -85,7 +87,7 @@ func (a *app) helpView(c *ui.Context) {
 					"The NDI runtime must be installed before the app starts.",
 					"The source is called “" + stageSourceName + "”.",
 					"The feed is the slide alone, up to 1920 × 1080, so it can go straight into OBS.",
-					"On macOS the stage window has to be on screen while it is publishing.",
+					"The feed is drawn, so it publishes with no window on screen at all.",
 					"Settings remembers whether NDI starts with the stage.",
 				} {
 					ui.Text(c, line).FontSize(11).TextColor(t.TextMuted)

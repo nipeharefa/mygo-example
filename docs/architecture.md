@@ -54,6 +54,9 @@ element or a context:
 | `ndiResolution int` | frame size: `ndiResolution720` (default) or `ndiResolution1080` |
 | `drawWait time.Duration` | a test hook: a delay inside the drawn feed, so Stop can be proven not to wait for a draw |
 | `settingsDir string`, `version string` | where `settings.json` lives and what Help reports |
+| `ctx context.Context` | the session's context; quit cancels it, which drops a check or a download still running |
+| `updatable bool` | whether this build can replace itself (`mygo.Updater.Enabled()` once ready) |
+| `updateChk`, `updateAsk`, `updateDl`, `updateRun` | seams over `mygo.Updater.Check`, `mygo.Dialog.Message`, the download, and `mygo.App.Relaunch` |
 
 `newApp()` picks the first pack and seeds the deck with Amazing Grace and
 Psalm 23:1, so a fresh run has something to show. `slide` carries an ID
@@ -212,6 +215,27 @@ frame and `tickStats` re-arms a one-second `time.AfterFunc` that
 invalidates the console — a main-thread timer, never a goroutine touching
 the view.
 
+### Updates
+
+**Help → Check for Updates…** runs `checkForUpdates`: the feed is asked on a
+goroutine and the main thread waits for the answer, then `showCheck` puts up
+one dialog — the newest version, the failure, or an offer of the new
+version with **Install and Restart** and **Not Now**. Choosing to install
+runs `installUpdate`, which downloads on a goroutine while the main thread
+waits, and restarts the app through `updateRun` when the download verifies.
+
+Waiting on the main thread is deliberate: `Dialog.Message` pumps the main
+loop while the operator reads the dialog, and the loop runs what it is
+handed one function at a time, so a step posted back with `mygo.RunOnMain`
+from inside a callback that is itself waiting would only run after that
+callback returned. The dialog would never get its result. The click is also
+the only thing the loop is waiting for at that point, so the interface
+behind the dialog keeps drawing and the automation socket keeps answering.
+
+A build says it cannot update, and why, when `Updater.Enabled()` is false:
+a `go run`/`go build` binary has no version and no feed, and an install a
+package manager owns cannot be replaced in place.
+
 ### Help
 
 `openHelp` creates the window once. It lists the About block (version, demo
@@ -349,6 +373,9 @@ tests must not press **Open output**).
   one, and the stats formatting.
 - `ndi_stats_test.go` — the sender's counters and measured rate without a
   runtime.
+- `update_test.go` — the version comparison, the newest-version and error
+  notes, the offer, install-and-restart, Not Now, a failed install, and the
+  unversioned and package-manager builds that say they cannot update.
 - `help_test.go`, `menu_test.go` — Help sections with and without a
   version; menu item IDs, the Settings accelerator, and click handlers
   present (clicks are not run, because they open windows).

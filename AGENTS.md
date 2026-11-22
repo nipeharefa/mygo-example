@@ -168,6 +168,18 @@ only updates signed with it. The tag's base version must match
 `version` in `mygo.config.ts`, and a hyphen (`v0.2.0-beta.1`) publishes a
 prerelease.
 
+The console's Help menu has **Check for Updates…**: it asks the release
+feed for a newer version (`mygo.Updater`) and offers to install it. That step
+runs on the main thread and waits for the answer there, holding only the
+network request on a goroutine; it must not hand the answer back with
+`mygo.RunOnMain`/`postMain`, because the loop runs what it is handed one
+function at a time, and a post made from inside the callback that waits for
+it never runs. `Updater.Enabled()` is false in a development build and in an
+install a package manager owns, so the feature says so instead of hiding.
+Only a stable release counts as latest: a beta install is told about the
+next stable version, and `releases/latest/download/updates` never resolves
+for a prerelease.
+
 `go tool mygo vet .` (the skill's command) does not work here: the pinned
 module ships no `mygo` tool, so plain `go vet ./...` is the gate.
 
@@ -188,6 +200,8 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `menu.go` | `buildMenu` (app, edit, Settings, Help menus) and `showAbout`. |
 | `settings.go` | The Settings page of the console: display radios, NDI switch and status line, the NDI stream stats, `settings.json` read/write, `loadSettings`/`saveSettings`, `refreshDisplays`. |
 | `help.go` | The Help window: about, keyboard table, NDI notes, sample-data notes. |
+| `update.go` | Help → Check for Updates…: `lookForUpdate` (the feed, with a timeout), `checkForUpdates`/`showCheck` (the offer), `installUpdate`, `sayUpdates`, and `newerVersion` for the comparison. |
+| `update_test.go` | The updater without a window or a feed: version order, the newest-version and error notes, the offer, install-and-restart, Not Now, a failed install, and the two builds that cannot update. |
 | `view_test.go` | Headless console tests: login gate, library, add/search, monitor vs stage (click, Go Live, Enter, Cmd+Enter), arrows, blackout, empty deck, sign out. |
 | `menu_test.go` | Headless menu structure: item IDs, accelerator, click handlers present (clicks not run). |
 | `settings_test.go` | Settings round-trip (display, NDI, frame size), missing/corrupt defaults, legacy `outputDisplay` migration, `stageDisplayFound`, the Settings page rendering, display refresh without reopening the stage. |

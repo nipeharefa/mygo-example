@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"strings"
@@ -65,6 +66,17 @@ type app struct {
 	settingsDir string // app data dir; empty keeps tests headless
 	version     string // mygo.App.Version(); empty under go run
 
+	// Updates, as the Help menu offers them: the context a check runs under
+	// (so quitting cancels it), whether this build can replace itself, and
+	// the seams a test stands in for, because a test has no release feed and
+	// cannot answer a dialog.
+	ctx       context.Context
+	updatable bool
+	updateChk func(ctx context.Context) (*mygo.Update, error)
+	updateAsk func(mygo.MessageOptions) (mygo.MessageResult, error)
+	updateDl  func(ctx context.Context, up *mygo.Update, progress func(downloaded, total int64)) error
+	updateRun func()
+
 	// The stage: where it opens, where the open window went, and whether
 	// NDI publishes it.
 	stageDisplay     int64         // 0 = windowed on the console's screen
@@ -90,7 +102,17 @@ type app struct {
 // newApp builds the console with a small seed set list so a fresh install
 // has something on stage.
 func newApp() *app {
-	a := &app{pack: packs[0].Name, newWindow: mygo.NewWindow, mainScreen: mygo.Screen.Displays}
+	a := &app{
+		pack:       packs[0].Name,
+		newWindow:  mygo.NewWindow,
+		mainScreen: mygo.Screen.Displays,
+		updateChk:  mygo.Updater.Check,
+		updateAsk:  mygo.Dialog.Message,
+		updateDl: func(ctx context.Context, up *mygo.Update, progress func(downloaded, total int64)) error {
+			return up.Install(ctx, progress)
+		},
+		updateRun: func() { mygo.App.Relaunch() },
+	}
 	a.addSong("amazing-grace")
 	a.addVerse("Psalm 23:1")
 	a.preview, a.stage = 0, 0
@@ -267,7 +289,13 @@ const (
 const statsInterval = time.Second
 
 func main() {
+	// The check for updates outlives a menu click, so one context owns it and
+	// quitting cancels what it is still downloading.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	a := newApp()
+	a.ctx = ctx
 	mygo.App.WhenReady(func() {
 		// Order matters: the display list is needed to normalize the saved
 		// preference, and the menu is built from the version. The list itself
@@ -284,6 +312,7 @@ func main() {
 			a.ndiOn = true
 		}
 		a.version = mygo.App.Version()
+		a.updatable = mygo.Updater.Enabled() || updatableOverride
 		mygo.App.SetMenu(buildMenu(a))
 		mygo.Screen.OnDisplaysChanged(a.displaysChanged)
 		a.win = a.newWindow(mygo.WindowOptions{
@@ -299,6 +328,7 @@ func main() {
 		a.tickStats()
 	})
 	mygo.App.OnQuit(a.stopNDI)
+	mygo.App.OnQuit(cancel)
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
