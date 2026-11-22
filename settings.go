@@ -19,6 +19,9 @@ type settings struct {
 	// screen the console is on.
 	Display int64 `json:"display"`
 	NDI     bool  `json:"ndi"`
+	// NDIResolution is the size the feed publishes at: 0 is 720p, the
+	// default, and 1 is 1080p.
+	NDIResolution int `json:"ndiResolution"`
 }
 
 // legacySettings is the file written before the display key was named
@@ -83,6 +86,7 @@ func (a *app) loadSettings() {
 	s := readSettings(a.settingsPath())
 	a.stageDisplay = s.Display
 	a.ndiOn = s.NDI
+	a.ndiResolution = s.NDIResolution
 	// Only drop the saved display when the list is known: startup fills it
 	// before loading, while a headless test may leave it empty.
 	if len(a.displays) > 0 && a.stageDisplay != 0 && !a.hasDisplay(a.stageDisplay) {
@@ -97,7 +101,7 @@ func (a *app) saveSettings() {
 	if path == "" {
 		return
 	}
-	err := writeSettings(path, settings{Display: a.stageDisplay, NDI: a.ndiOn})
+	err := writeSettings(path, settings{Display: a.stageDisplay, NDI: a.ndiOn, NDIResolution: a.ndiResolution})
 	if err != nil {
 		log.Printf("mygo-demo: save settings: %v", err)
 	}
@@ -196,6 +200,16 @@ func (a *app) settingsBody(c *ui.Context) {
 			})
 			status, color := a.ndiStatus(t)
 			ui.Text(c, status).FontSize(11).TextColor(color)
+
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "Stage output size").FontSize(12).FontWeight(600).SingleLine()
+					ui.Text(c, "The feed draws the slide itself, so it does not depend on the stage window or on a second monitor.").
+						FontSize(10).TextColor(t.TextMuted)
+				})
+				ui.Radio(c, &a.ndiResolution, ndiResolution720, "720p").OnChange(a.ndiResolutionChanged)
+				ui.Radio(c, &a.ndiResolution, ndiResolution1080, "1080p").OnChange(a.ndiResolutionChanged)
+			})
 			a.ndiStatsSection(c)
 
 			ui.Divider(c)
@@ -259,13 +273,21 @@ func (a *app) stageDisplayChanged() {
 	a.changed()
 }
 
+// ndiResolutionChanged runs when a size radio is picked: the preference is
+// saved and a running source restarts at the new size.
+func (a *app) ndiResolutionChanged() {
+	a.saveSettings()
+	a.restartNDI()
+	a.changed()
+}
+
 // ndiToggled is the Switch handler: the switch already wrote a.ndiOn.
 func (a *app) ndiToggled() {
 	a.setNDI(a.ndiOn)
 }
 
-// setNDI records the NDI preference and applies it to an open stage. Turning
-// it on with no stage open is not an error: the preference waits.
+// setNDI records the NDI preference and starts or stops the source. The
+// feed draws the slide itself, so publishing needs no stage window.
 func (a *app) setNDI(on bool) {
 	if !ndiSupported() {
 		return
@@ -273,9 +295,7 @@ func (a *app) setNDI(on bool) {
 	a.ndiOn = on
 	a.saveSettings()
 	if on {
-		if a.live != nil {
-			_ = a.startNDI()
-		}
+		_ = a.startNDI()
 	} else {
 		a.stopNDI()
 		a.ndiErr = ""
@@ -293,7 +313,7 @@ func (a *app) ndiStatus(t *ui.Theme) (string, ui.Color) {
 	case a.ndi != nil:
 		return "Publishing as “" + stageSourceName + "”.", t.Success
 	case a.ndiOn:
-		return "On. Starts when the stage opens.", t.TextMuted
+		return "On. Starts as soon as publishing begins.", t.TextMuted
 	default:
 		return "Off.", t.TextMuted
 	}

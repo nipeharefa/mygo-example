@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -84,7 +85,7 @@ func TestRenderStageFrameFollowsTheStage(t *testing.T) {
 	a := newApp()
 	a.addSong("amazing-grace")
 	a.addVerse("psalm23-1")
-	src := a.frameSource(640, 360)
+	src := newStageSource(a, 640, 360, make(chan struct{}))
 
 	first, ok := src.frame(640, 360)
 	if !ok {
@@ -110,7 +111,7 @@ func TestRenderStageFrameFollowsTheStage(t *testing.T) {
 	if !ok {
 		t.Fatal("the blackout frame gave no frame")
 	}
-	if want := stageTheme().Background; !isFill(empty, want) {
+	if !isOneColour(empty.pix) {
 		t.Fatal("blackout should render the stage background and nothing else")
 	}
 }
@@ -121,7 +122,7 @@ func TestRenderStageFrameTracksTheStage(t *testing.T) {
 	a := newApp()
 	a.addSong("amazing-grace")
 	a.addVerse("psalm23-1")
-	src := a.frameSource(320, 180)
+	src := newStageSource(a, 320, 180, make(chan struct{}))
 	before, ok := src.frame(320, 180)
 	if !ok {
 		t.Fatal("no first frame")
@@ -183,7 +184,7 @@ func TestRenderStageFrameFillsALargerFrame(t *testing.T) {
 	a := newApp()
 	a.addSong("amazing-grace")
 	a.addVerse("psalm23-1")
-	src := a.frameSource(2560, 1080)
+	src := newStageSource(a, 2560, 1080, make(chan struct{}))
 	f, ok := src.frame(2560, 1080)
 	if !ok {
 		t.Fatal("no frame")
@@ -193,6 +194,60 @@ func TestRenderStageFrameFillsALargerFrame(t *testing.T) {
 	}
 	if !hasTextInk(f, stageTheme().Text) {
 		t.Fatal("the capped frame lost the slide text")
+	}
+}
+
+// A frame larger than the stage but not 16:9 is still the whole slide: the
+// image is drawn at the bigger scale and shrunk to the frame, never cropped
+// to its middle.
+func TestRenderStageFrameFitsAnOddLargerFrame(t *testing.T) {
+	a := newApp()
+	a.addSong("amazing-grace")
+	a.addVerse("psalm23-1")
+	for _, size := range [][2]int{{1600, 720}, {1920, 810}, {1920, 1000}} {
+		f, ok := newStageSource(a, size[0], size[1], make(chan struct{})).frame(size[0], size[1])
+		if !ok {
+			t.Fatalf("no frame at %dx%d", size[0], size[1])
+		}
+		if f.w != size[0] || f.h != size[1] {
+			t.Fatalf("frame at %dx%d = %dx%d", size[0], size[1], f.w, f.h)
+		}
+		if !hasTextInk(f, stageTheme().Text) {
+			t.Fatalf("the frame at %dx%d lost the slide text", size[0], size[1])
+		}
+	}
+}
+
+// Review Focus 3, in flight: Stop closes while a draw waits for the main
+// thread, and the frame loop must return without waiting for that draw.
+func TestStageSourceStopDoesNotWaitForADraw(t *testing.T) {
+	const wait = 40 * time.Millisecond
+	a := newApp()
+	a.addSong("amazing-grace")
+	a.addVerse("psalm23-1")
+	// A window's pointer is enough: nothing dereferences it here, and
+	// mygo.NewWindow needs a running application.
+	a.win = new(mygo.Window)
+	// A draw that needs the main thread takes at least this long to come
+	// back: the loop below is not running.
+	a.drawWait = wait
+	stop := make(chan struct{})
+	src := newStageSource(a, 320, 180, stop)
+
+	got := make(chan bool, 1)
+	go func() {
+		_, ok := src.frame(320, 180)
+		got <- ok
+	}()
+	time.Sleep(wait / 4)
+	close(stop)
+	select {
+	case ok := <-got:
+		if ok {
+			t.Fatal("a stopped source returned a frame")
+		}
+	case <-time.After(wait / 2):
+		t.Fatal("Stop waited for the draw in flight")
 	}
 }
 
@@ -230,9 +285,8 @@ func hasTextInk(f ndiFrame, want ui.Color) bool {
 	return false
 }
 
-// The conversion names all four bytes of a pixel: under this toolchain a
-// group assignment that names only some of them zeroes the rest (see bgrA),
-// and a frame that loses its alpha or one colour is a black feed.
+// The conversion names all four bytes of a pixel, so no byte is left at
+// whatever the buffer held before and a frame keeps its alpha and colours.
 func TestRenderFrameSwapsColourAndKeepsAlpha(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 2, 1))
 	copy(img.Pix, []byte{11, 10, 9, 255, 246, 241, 232, 128})

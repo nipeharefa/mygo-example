@@ -5,6 +5,7 @@ package main
 import (
 	"image"
 	"math"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -23,15 +24,8 @@ func renderFrame(img *image.RGBA) ndiFrame {
 }
 
 // bgrA swaps red and blue over h rows of a bitmap stride bytes a row into
-// dst, 4×w bytes a row.
-//
-// The swap assigns all four bytes of a pixel, not just the two it exchanges.
-// Under this toolchain (Go 1.27.3 darwin/arm64) a group assignment that names
-// only some of a pixel's bytes is not reliable: `dst[q], dst[q+2] =
-// src[q+2], src[q]` reads back as red set, green zero, blue set, alpha zero,
-// whether dst is fresh, copied, or a literal, at any optimisation level.
-// Naming all four bytes is the shape that measures right, and it is the
-// shape TestRenderFrameSwapsColourAndKeepsAlpha pins.
+// dst, 4×w bytes a row. Each pixel is assigned all four of its bytes, so the
+// swap does not depend on what dst held before.
 func bgrA(dst, src []byte, stride, h int) {
 	for y := 0; y < h; y++ {
 		in := src[y*stride : (y+1)*stride]
@@ -74,13 +68,12 @@ func ndiFrameSize(w, h int) (int, int) {
 	return nw, nh
 }
 
-// ndiStageWidth and ndiStageHeight are the stage laid out the way the
-// output window lays it out: the window opens at 1280×720, and a view laid
-// out much narrower does not fit its padding and drops its text. The feed
-// lays the stage out at this size whatever the frame is and shrinks or
-// grows it to fit, so a small frame is the slide made smaller, not the
-// middle of it. ui.Render scales text but still wraps lines at the layout's
-// width, which is why the width stays full even in a narrow frame.
+// ndiStageWidth and ndiStageHeight are the stage laid out at the size the
+// output window opens at (output.go), the size the diagnostics report the
+// capture at, and the size the feed draws the slide at. A view laid out much
+// narrower does not fit its padding and drops its text, so the feed never
+// lays the stage out smaller than this: ui.Render scales text but still
+// wraps lines at the layout's width.
 const (
 	ndiStageWidth  = 1280
 	ndiStageHeight = 720
@@ -94,26 +87,25 @@ func (a *app) renderStageFrame(w, h int) (ndiFrame, bool) {
 	if w <= 0 || h <= 0 {
 		return ndiFrame{}, false
 	}
-	// ui.Render takes DIPs and a device-pixel scale, and returns
-	// ceil(DIP×scale) pixels across. The stage is laid out at its own size
-	// either way, so the frame fits the slide and keeps its proportions;
-	// the scale is the growth needed when the frame is larger than that,
-	// and 1 when it is not, leaving shrinkFrame to do the shrinking by
-	// whole pixels rather than the engine's smooth resample.
+	// The stage is laid out at its own size and the frame is scaled to the
+	// size wanted, so a frame smaller than the stage is the slide made
+	// smaller, never the middle of it. A frame larger than the stage is
+	// drawn at the bigger scale, and ui.Render rounds up, so the image
+	// covers the frame and shrinking it never has to crop.
 	scale := float32(1)
 	if w > ndiStageWidth || h > ndiStageHeight {
 		scale = float32(math.Max(float64(w)/ndiStageWidth, float64(h)/ndiStageHeight))
 	}
-	img := ui.Render(a.liveView, ndiStageWidth, ndiStageHeight, scale)
-	return shrinkFrame(renderFrame(img), w, h), true
+	return shrinkFrame(renderFrame(ui.Render(a.liveView, ndiStageWidth, ndiStageHeight, scale)), w, h), true
 }
 
 // shrinkFrame fits a frame to w×h by averaging blocks of it down. A frame
-// the size wanted is copied, bytes and all, which is the common case: the
-// stream draws at the frame size, so no averaging has to be paid for. A
-// frame smaller than w×h is never grown: its centre is taken instead. The
-// result is a buffer of its own, since the frame loop keeps the frame it was
-// handed while the next one is drawn.
+// the size wanted is copied, bytes and all, which is the common case. The
+// frame drawn at a larger scale covers w×h and is averaged down. A frame
+// that does not cover w×h cannot happen after the scale above, and falls
+// back to its centre rather than growing. The result is a buffer of its own,
+// since the frame loop keeps the frame it was handed while the next one is
+// drawn.
 func shrinkFrame(f ndiFrame, w, h int) ndiFrame {
 	if f.w == w && f.h == h {
 		pix := make([]byte, len(f.pix))
@@ -197,9 +189,11 @@ func cropFrame(f ndiFrame, x, y, w, h int) ndiFrame {
 	return ndiFrame{pix: pix, stride: 4 * w, w: w, h: h}
 }
 
-// frameSource adapts the stage to the sender's goroutine.
-func (a *app) frameSource(w, h int) ndiFrameSource {
-	return newStageSource(a, w, h, make(chan struct{}))
+// stageSourceFor adapts the stage to a stream's goroutine: the source draws
+// the slide that is on stage when a frame is asked for.
+func (a *app) stageSourceFor(stop chan struct{}) ndiFrameSource {
+	w, h := a.ndiFrameSize()
+	return newStageSource(a, w, h, stop)
 }
 
 // stageSource renders the stage for the frame loop: each call draws on the
@@ -218,39 +212,46 @@ func newStageSource(a *app, w, h int, stop chan struct{}) *stageSource {
 	return &stageSource{a: a, w: w, h: h, stop: stop}
 }
 
-// frame draws one frame on the main thread and waits for it.
+// frame draws one frame on the main thread and waits for it, up to stop.
 //
 // mygo.RunOnMain runs the function inline when the caller is the main
 // thread, which is the startup preflight in startNDISender, and drops it
-// once the event loop has shut down. Neither drains the handoff channel the
-// brief sketches: until the app runs its loop (a headless test never does),
-// a posted render waits forever. So the main thread is chosen without
-// asking MyGo: before a console window exists nothing is on screen, the
-// draw may run on the calling goroutine, and that is App.WhenReady and
-// every test. Afterwards the draw hops to the main thread, and the wait
-// selects on stop, so a render still in flight cannot outlive Stop.
+// once the event loop has shut down. Otherwise it waits for the loop, which
+// a headless test never runs. So the draw runs inline until a console window
+// exists: nothing is on screen before App.WhenReady, and a.win is set on the
+// main thread only. Afterwards a helper goroutine posts the draw and waits,
+// and the frame loop selects on that frame or on stop, so Stop never waits
+// on a render and a frame cannot outlive the stream. A draw that already
+// started when Stop closed waits for nothing but the main thread, and its
+// frame is dropped: stop is checked again once the draw returns.
 func (s *stageSource) frame(w, h int) (ndiFrame, bool) {
-	select {
-	case <-s.stop:
+	if stopped(s.stop) {
 		return ndiFrame{}, false
-	default:
 	}
-	if a := s.a; a.win == nil {
-		f, ok := a.renderStageFrame(w, h)
+	if s.a.win == nil {
+		if wait := s.a.drawWait; wait > 0 {
+			time.Sleep(wait)
+		}
+		f, ok := s.a.renderStageFrame(w, h)
 		if !ok || stopped(s.stop) {
 			return ndiFrame{}, false
 		}
 		return f, true
 	}
 	out := make(chan ndiFrame, 1)
-	mygo.RunOnMain(func() {
-		if f, ok := s.a.renderStageFrame(w, h); ok {
-			select {
-			case out <- f:
-			default:
+	go func() {
+		mygo.RunOnMain(func() {
+			if stopped(s.stop) {
+				return
 			}
-		}
-	})
+			if f, ok := s.a.renderStageFrame(w, h); ok && !stopped(s.stop) {
+				select {
+				case out <- f:
+				default:
+				}
+			}
+		})
+	}()
 	select {
 	case f := <-out:
 		return f, true

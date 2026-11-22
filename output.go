@@ -104,19 +104,20 @@ func (a *app) placeStage(live *mygo.Window) bool {
 }
 
 // shutStage runs once when the stage window closes, whether from the
-// console, its own Esc, or the window's close button.
+// console, its own Esc, or the window's close button. NDI keeps publishing:
+// the feed draws the slide, so the room does not go dark because the
+// operator closed the window it was previewing on.
 func (a *app) shutStage(live *mygo.Window) {
 	if live == nil || a.live != live {
 		return
 	}
 	a.live = nil
 	a.stageDisplayUsed = 0
-	a.stopNDI()
 	a.changed()
 }
 
-// closeOutput drops the stage window and the NDI source publishing it. The
-// window is forgotten first, so its own close event finds nothing to do.
+// closeOutput drops the stage window. The window is forgotten first, so its
+// own close event finds nothing to do.
 func (a *app) closeOutput() {
 	live := a.live
 	if live == nil {

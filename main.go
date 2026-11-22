@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"log"
 	"os"
 	"strings"
@@ -70,6 +69,8 @@ type app struct {
 	// NDI publishes it.
 	stageDisplay     int64          // 0 = windowed on the console's screen
 	stageDisplayUsed int64          // display the open stage was placed on
+	ndiResolution    int            // frame size the feed publishes
+	drawWait         time.Duration  // a headless test's stand-in for the main thread
 	ndiOn            bool           // publish the stage when it opens
 	displays         []mygo.Display // refreshed at startup and on display changes
 
@@ -172,9 +173,10 @@ func (a *app) tickStats() {
 	})
 }
 
-// startNDI publishes the live window as an NDI source. There is nothing to
-// publish before the output window is open, so that is a clear error rather
-// than a silent no-op.
+// startNDI publishes the stage as an NDI source. The feed draws the slide
+// itself, so it does not need the output window: one monitor is enough, and
+// the window may stay closed or behind the console while the room sees the
+// slide.
 func (a *app) startNDI() error {
 	if !ndiSupported() {
 		return nil
@@ -182,17 +184,33 @@ func (a *app) startNDI() error {
 	if a.ndi != nil {
 		return nil
 	}
-	if a.live == nil {
-		a.ndiErr = "NDI output needs the live window"
-		return errors.New(a.ndiErr)
-	}
-	s, err := startNDISender(a.live)
+	w, h := a.ndiFrameSize()
+	s, err := startNDISender(a.stageSourceFor, w, h)
 	if err != nil {
 		a.ndiErr = err.Error()
 		return err
 	}
 	a.ndi, a.ndiErr = s, ""
 	return nil
+}
+
+// ndiFrameSize is the frame published: 720p by default, 1080p when the
+// preference asks for it. Both are 16:9, the stage's shape.
+func (a *app) ndiFrameSize() (int, int) {
+	if a.ndiResolution == ndiResolution1080 {
+		return 1920, 1080
+	}
+	return 1280, 720
+}
+
+// restartNDI swaps the source for one at the current size, keeping the
+// preference: the Settings page calls it once the size changes.
+func (a *app) restartNDI() {
+	if a.ndi == nil {
+		return
+	}
+	a.stopNDI()
+	_ = a.startNDI()
 }
 
 // stopNDI removes the source; it is safe when nothing is streaming.
@@ -222,6 +240,14 @@ func (a *app) ndiLabel() string {
 const (
 	pageConsole = iota
 	pageSettings
+)
+
+// The sizes the feed publishes at, in the order Settings offers them.
+// 720p is the default: it is what most projectors and streams take, and it
+// is what a capture of the stage window published before.
+const (
+	ndiResolution720 = iota
+	ndiResolution1080
 )
 
 // statsInterval is how often a visible NDI stats table is refreshed.

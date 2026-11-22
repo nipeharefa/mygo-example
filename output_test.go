@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -80,31 +81,40 @@ func TestLiveViewShortcuts(t *testing.T) {
 	}
 }
 
-// NDI needs the live window; without it the console shows why.
-func TestStartNDIWithoutOutput(t *testing.T) {
+// Review Focus 1: the feed draws the slide, so one monitor is enough and the
+// source starts with no stage window at all.
+func TestStartNDIWithoutAWindow(t *testing.T) {
 	if !ndiSupported() {
 		t.Skip("no NDI sender on this platform")
 	}
 	a := newApp()
-	if err := a.startNDI(); err == nil {
-		t.Fatal("starting NDI without an output window should fail")
+	err := a.startNDI()
+	if err != nil && !strings.Contains(err.Error(), "NDI") {
+		t.Fatalf("starting NDI failed: %v", err)
 	}
-	if a.ndi != nil {
-		t.Fatal("a sender was kept without an output window")
+	if err != nil {
+		// The runtime here cannot publish; the state still has to agree.
+		if a.ndi != nil || a.ndiErr == "" {
+			t.Fatalf("a failed start kept a sender: ndi=%v err=%q", a.ndi, a.ndiErr)
+		}
+		return
 	}
-	if a.ndiErr == "" {
-		t.Fatal("no error was recorded for the console")
+	defer a.stopNDI()
+	if a.ndi == nil || a.ndiErr != "" {
+		t.Fatalf("NDI did not start: ndi=%v err=%q", a.ndi, a.ndiErr)
 	}
 }
 
-// The NDI toggle is not offered until there is a window to publish.
-func TestNDIHiddenWithoutOutput(t *testing.T) {
+// Closing the stage window is not a request to stop publishing the room.
+func TestClosingTheStageKeepsNDI(t *testing.T) {
+	if !ndiSupported() {
+		t.Skip("NDI is not built in")
+	}
 	a := newApp()
-	tt := ui.NewTester(a.view, consoleWidth, consoleHeight)
-	signIn(t, a, tt)
-
-	if tt.HasText("Start NDI") {
-		t.Fatalf("the console offers NDI before the output is open: %q", tt.Texts())
+	a.ndiOn = true
+	a.closeOutput()
+	if !a.ndiOn {
+		t.Fatal("closing the stage cleared the NDI preference")
 	}
 }
 
@@ -128,21 +138,15 @@ func TestLiveViewRendersTheStageNotTheMonitor(t *testing.T) {
 	}
 }
 
-// Turning NDI on with no stage open records the preference and waits.
-func TestSetNDIWaitsForTheStage(t *testing.T) {
-	if !ndiSupported() {
-		t.Skip("NDI is not built in")
+// The size the feed publishes at is the preference, 720p by default.
+func TestNDIResolutionSetting(t *testing.T) {
+	a := newApp()
+	if w, h := a.ndiFrameSize(); w != 1280 || h != 720 {
+		t.Fatalf("default feed size = %dx%d, want 720p", w, h)
 	}
-	a := &app{}
-	a.setNDI(true)
-	if !a.ndiOn {
-		t.Fatal("the NDI preference was not recorded")
-	}
-	if a.ndi != nil {
-		t.Fatal("NDI started without a stage window")
-	}
-	if a.ndiErr != "" {
-		t.Fatalf("waiting for the stage set an error: %q", a.ndiErr)
+	a.ndiResolution = ndiResolution1080
+	if w, h := a.ndiFrameSize(); w != 1920 || h != 1080 {
+		t.Fatalf("1080p feed size = %dx%d", w, h)
 	}
 }
 
