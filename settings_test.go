@@ -11,12 +11,34 @@ import (
 
 func TestSettingsRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	want := settings{Display: 42, NDI: true}
+	want := settings{Display: 42, NDI: true, NDIResolution: ndiResolution1080}
 	if err := writeSettings(path, want); err != nil {
 		t.Fatalf("writeSettings: %v", err)
 	}
 	if got := readSettings(path); got != want {
 		t.Fatalf("readSettings = %+v, want %+v", got, want)
+	}
+}
+
+// 720p is the default, so it survives a round trip and a missing key.
+func TestNDIResolutionRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if got := readSettings(path).NDIResolution; got != ndiResolution720 {
+		t.Fatalf("default resolution = %d, want 720p", got)
+	}
+	if err := writeSettings(path, settings{NDIResolution: ndiResolution1080}); err != nil {
+		t.Fatalf("writeSettings: %v", err)
+	}
+	if got := readSettings(path).NDIResolution; got != ndiResolution1080 {
+		t.Fatalf("resolution = %d, want 1080p", got)
+	}
+	a := &app{settingsDir: filepath.Dir(path)}
+	a.ndiResolution = ndiResolution1080
+	a.saveSettings()
+	b := &app{settingsDir: a.settingsDir}
+	b.loadSettings()
+	if b.ndiResolution != ndiResolution1080 {
+		t.Fatalf("loaded resolution = %d, want 1080p", b.ndiResolution)
 	}
 }
 
@@ -62,12 +84,14 @@ func TestAppSaveLoadSettings(t *testing.T) {
 	a := &app{settingsDir: t.TempDir()}
 	a.stageDisplay = 7
 	a.ndiOn = true
+	a.ndiResolution = ndiResolution1080
 	a.saveSettings()
 
 	b := &app{settingsDir: a.settingsDir}
 	b.loadSettings()
-	if b.stageDisplay != 7 || !b.ndiOn {
-		t.Fatalf("loaded stageDisplay = %d ndiOn = %v, want 7/true", b.stageDisplay, b.ndiOn)
+	if b.stageDisplay != 7 || !b.ndiOn || b.ndiResolution != ndiResolution1080 {
+		t.Fatalf("loaded stageDisplay = %d ndiOn = %v resolution = %d, want 7/true/1080p",
+			b.stageDisplay, b.ndiOn, b.ndiResolution)
 	}
 }
 
@@ -155,13 +179,34 @@ func TestSettingsPageListsDisplays(t *testing.T) {
 		{ID: 2, Label: "Projector", Bounds: mygo.Rectangle{Width: 1920, Height: 1080}},
 	}}
 	tt := ui.NewTester(a.settingsBody, 900, 800)
-	for _, want := range []string{"Stage output", "Windowed on this screen", "Built-in", "Projector", "Publish the stage over NDI", "NDI stream", "Data"} {
+	for _, want := range []string{"Stage output", "Windowed on this screen", "Built-in", "Projector", "Publish the stage over NDI", "Stage output size", "720p", "1080p", "NDI stream", "Data"} {
 		if !tt.HasText(want) {
 			t.Fatalf("settings is missing %q: %q", want, tt.Texts())
 		}
 	}
 	if tt.HasText("Automatic") {
 		t.Fatal("settings still offers Automatic")
+	}
+}
+
+// The size radio restarts a running source, and the page says what the feed
+// does not need to publish.
+func TestNDIResolutionPage(t *testing.T) {
+	a := newApp()
+	tt := ui.NewTester(a.settingsBody, 900, 800)
+	if !tt.HasText("The feed draws the slide itself, so it does not depend on the stage window or on a second monitor.") {
+		t.Fatalf("settings does not explain the windowless feed: %q", tt.Texts())
+	}
+	// No source is running here: changing the size moves the preference and
+	// leaves publishing alone. A running source is stopped by the same
+	// call, and stopping one needs a real stream (ndiStream_test.go).
+	a.ndiResolution = ndiResolution1080
+	a.ndiResolutionChanged()
+	if a.ndiResolution != ndiResolution1080 {
+		t.Fatal("the size preference did not change")
+	}
+	if a.ndi != nil {
+		t.Fatal("changing the size started a source")
 	}
 }
 

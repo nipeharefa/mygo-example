@@ -150,14 +150,32 @@ func TestNDIResolutionSetting(t *testing.T) {
 	}
 }
 
-// Review Focus 4: signing out leaves no sender behind.
+// Review Focus 4: signing out leaves no sender behind, preference and all.
 func TestSignOutStopsNDI(t *testing.T) {
 	a := newApp()
 	a.ndiOn = true
 	a.signedIn = true
 	a.signOut()
-	if a.ndi != nil {
-		t.Fatal("NDI still set after sign-out")
+	if a.ndi != nil || a.ndiErr != "" {
+		t.Fatalf("NDI still set after sign-out: ndi=%v err=%q", a.ndi, a.ndiErr)
+	}
+}
+
+// The status line says what the feed is doing, with or without a window.
+func TestNDIStatusWithoutStage(t *testing.T) {
+	if !ndiSupported() {
+		t.Skip("NDI is not built in")
+	}
+	a := newApp()
+	a.ndiOn = true
+	text, _ := a.ndiStatus(ui.LightTheme())
+	if text != "On. Starts as soon as publishing begins." {
+		t.Fatalf("status without a source = %q", text)
+	}
+	a.ndiErr = "the runtime is missing"
+	text, _ = a.ndiStatus(ui.LightTheme())
+	if text != "NDI: the runtime is missing" {
+		t.Fatalf("status with an error = %q", text)
 	}
 }
 
