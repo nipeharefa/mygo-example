@@ -48,7 +48,7 @@
   - `type ndiFrameSource interface { frame(w, h int) (ndiFrame, bool) }`
   - `func startNDISender(src ndiFrameSource, w, h int) (stream *ndiStream, err error)`
   - `func (s *ndiStream) run()`, `func (s *ndiStream) Stop()`, `func (s *ndiStream) snapshot() ndiStats` — unchanged API.
-  - Per-platform, still required: `ndiLibraryCandidates() []string`, `ndiInstallHint() string`, `ndiCaptureFailure() string`, `openNDILibrary(path string) (uintptr, error)`, `closeNDILibrary(handle uintptr)`, `ndiSymbol(handle uintptr, name string) (uintptr, error)`, `registerFunc(lib uintptr, fn any, name string) error`.
+  - Per-platform, still required: `ndiLibraryCandidates() []string`, `ndiInstallHint() string`, `ndiCaptureFailure() string`, `openNDILibrary(path string) (uintptr, error)`, `closeNDILibrary(handle uintptr)`, `ndiSymbol(handle uintptr, name string) (uintptr, error)`. (`registerFunc` and the size policy stay in the shared files: `ndi_render.go` owns `ndiFrameSize`/`ndiRenderSize`, and `bindNames`' comment records why no per-platform binding wrapper came back — see the rulings in the ledger.)
 
 - [ ] **Step 1: Write the failing test**
 
