@@ -4,8 +4,9 @@ A simple worship presenter for a small church screen, built with
 [MyGo](https://github.com/egoist/mygo). It keeps a run of show of public
 domain hymns and King James verses, previews the next slide on a monitor
 while one slide goes to a separate stage window, and can publish that stage
-as an NDI video source for OBS or a projector feed. Everything stays on the
-machine: no account, no network, no database.
+as an NDI video source for OBS or a projector feed — with no window on
+screen, so one monitor is enough. Everything stays on the machine: no
+account, no network, no database.
 
 Sign in with **admin** / **admin**. The sign-in is a demo gate, not
 security.
@@ -46,10 +47,12 @@ are looking at). Moving the monitor never changes the room until you press
    row, and **Black out** hides the text without touching the list.
 5. **Open output** opens the stage window. It is a 1280×720 window unless
    **Settings** names a display, in which case it opens fullscreen there.
-   **Present** toggles fullscreen, **Close output** closes it. The
-   **Settings** page (Cmd/Ctrl+, or the button in the top bar) also holds
-   the NDI switch and the stream's own stats; the **Help** menu lists the
-   shortcuts and the NDI setup.
+   **Present** toggles fullscreen, **Close output** closes it. On one
+   monitor, skip the window altogether: turn on NDI instead, and OBS or
+   NDI Video Monitor shows the stage while the console keeps the keyboard.
+   The **Settings** page (Cmd/Ctrl+, or the button in the top bar) also
+   holds the NDI switch, the output size and the stream's own stats; the
+   **Help** menu lists the shortcuts and the NDI setup.
 
 The console shortcuts are **←** / **→** for the monitor, **B** for blackout,
 and **Cmd/Ctrl+Enter** to go live. In the stage window **← → ↑ ↓** and
@@ -59,19 +62,32 @@ it. The stage window has no title bar, so drag the slide itself to move it
 to a projector; the console can stay with the operator.
 
 The stage opens once and stays open until you close it: changing anything
-that does not touch the display the stage is on leaves it alone.
+that does not touch the display the stage is on leaves it alone. Closing it
+does not stop NDI, so a feed can keep running with no stage window at all.
 
 The display and NDI preferences are saved between runs; the run of show is
 not. A saved display that is no longer attached falls back to a window.
 
 ## The live output as an NDI source
 
-The stage window can publish itself as an NDI source on macOS, Windows
-and Linux. Each platform needs the NDI Runtime installed (version 5 or 6),
-and the console reports a missing or unusable runtime in a strip under the
-header instead of failing silently. NDI publishes only while the stage
-window is open; closing it stops the stream. The switch on the
-**Settings** page sets the same preference as **Start NDI** in the header.
+The stage can publish itself as an NDI source on macOS, Windows and Linux.
+The feed is **drawn, not captured**: the app renders the slide and hands the
+picture to the NDI sender, so it needs no window on screen, no second
+monitor and nothing in the foreground. Start NDI, keep the console where it
+is, and the source carries the slide — and only the slide, with no window
+chrome.
+
+Each platform needs the NDI Runtime installed (version 5 or 6). A missing
+or unusable runtime is reported in a strip under the console header, and
+the same goes for a sender that cannot start, instead of failing silently.
+The switch on the **Settings** page sets the same preference as **Start
+NDI** in the console header, and `MYGO_NDI=1` starts it at launch. Closing
+the stage window does **not** stop the stream; sign out, or turn the switch
+off, to stop it.
+
+**Stage output size** in Settings picks 720p (the default) or 1080p. The
+feed is the slide at 1280×720 laid out and drawn at the size requested, so
+text stays sharp at 1080p.
 
 The **NDI stream** section of Settings reports the sender's own numbers —
 resolution, measured frame rate, frames sent, dropped frames, up time and
@@ -87,22 +103,12 @@ The source is called `mygo-demo (Live)`. Other machines see it as
 1. Install the NDI Runtime, which ships with [NDI Tools](https://ndi.video/tools/).
    The app looks for `/usr/local/lib/libndi.dylib`, where the installer
    puts it.
-2. Open the stage window, then turn on **Publish the stage over NDI** in
-   **Settings** (or press **Start NDI** in the console header, or start the
-   app with `MYGO_NDI=1` in the environment).
-3. In OBS add an **NDI Source**, or open NDI Video Monitor, and pick
-   `mygo-demo (Live)`.
-4. The feed is the slide alone: the output window has no title bar or
-   window chrome, so no desktop edge frames it. On a Retina display the
-   capture runs at the display's pixel density and is scaled down to at
-   most 1920×1080, so text stays sharp; a fullscreen output on a 1080p
-   projector is native 1080p.
-
-The output window has to be **on screen** while it streams: macOS gives
-an app the image of its own window only while the window server shows it,
-so a minimized window, one on another Space, or one behind a full-screen
-app yields no frames and **Start NDI** says so. A fullscreen output on a
-projector is on screen, which is the normal case.
+2. Turn on **Start NDI** in the console header (or **Publish the stage over
+   NDI** in **Settings**, or start the app with `MYGO_NDI=1`). The stage
+   window does not have to be open.
+3. In OBS add an **NDI Source** (with
+   [DistroAV](https://github.com/DistroAV/DistroAV/releases)), or open NDI
+   Video Monitor, and pick `mygo-demo (Live)`.
 
 ### Windows
 
@@ -112,10 +118,8 @@ projector is on screen, which is the normal case.
    `C:\Program Files\NDI\NDI 6 Tools\Runtime` (or
    `C:\Program Files\NDI\NDI 6 Runtime`) and sets `NDI_RUNTIME_DIR_V6`.
    The app searches both folders.
-2. Open the stage window, then press **Start NDI** in the console header
-   or turn on the switch in **Settings**.
-3. The feed is the slide alone, captured from the window's client area at
-   the display's pixel density; a frameless output sends no window chrome.
+2. Press **Start NDI** in the console header or turn on the switch in
+   **Settings**. The stage window does not have to be open.
 
 To *receive* NDI in OBS you still need the plugin:
 [DistroAV](https://github.com/DistroAV/DistroAV/releases) (formerly
@@ -129,12 +133,9 @@ runtime.
 1. Install the NDI Runtime, which ships with
    [NDI Tools](https://ndi.video/tools/) and lands in
    `/usr/local/lib/libndi.so`.
-2. Open the stage window, then press **Start NDI** in the console header
-   or turn on the switch in **Settings**.
-3. The feed is the slide alone, captured through GDK at the window's pixel
-   size, so it works on **X11**. On Wayland the app cannot read its own
-   pixels and the header reports that instead.
-4. To receive it in OBS, install DistroAV from Flatpak or its `.deb`
+2. Press **Start NDI** in the console header or turn on the switch in
+   **Settings**. The stage window does not have to be open.
+3. To receive it in OBS, install DistroAV from Flatpak or its `.deb`
    release asset; NDI Video Monitor from NDI Tools also works.
 
 Window Capture in OBS remains a simpler fallback when the output and OBS
@@ -146,7 +147,7 @@ are on the same machine.
 CGO_ENABLED=0 go build ./...   # the app, no cgo anywhere
 CGO_ENABLED=0 go test ./...    # headless view tests
 go run .                       # opens the console
-MYGO_NDI=1 go run .            # ...and starts NDI once the output opens
+MYGO_NDI=1 go run .            # ...and publishes the stage over NDI
 bun run build                  # packaged installers in build/
 ```
 

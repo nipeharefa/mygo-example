@@ -4,7 +4,8 @@
 screen. It keeps a run of show of public-domain hymns and King James
 verses, previews the next slide on a monitor and sends one slide to a
 separate stage window, and can publish that stage as an NDI source on
-macOS, Windows and Linux. The Go side is the whole app: package `main`
+macOS, Windows and Linux. The NDI feed draws the slide itself, so publishing
+needs no window on screen and one monitor is enough. The Go side is the whole app: package `main`
 builds the console plus on-demand stage, Settings and Help windows with
 `github.com/egoist/mygo/ui`, and there is no network access, no database,
 and no web page in use.
@@ -37,15 +38,27 @@ identity rules live in
   `a.settings` and `a.help` (each nil-safe). Call it from
   `OnClick`/`OnSubmit`/`OnChange`/shortcut/menu callbacks, never from
   inside the build pass.
-- **The stage is the output, and NDI publishes only it.** The
-  window is `Frameless`, so the slide fills it and the capture carries no
-  window chrome; the slide columns are `DragWindow()` handles so a
-  windowed output can still be moved. `a.live`
-  is created by `openOutput` and nilled in its `OnClosed` (guarded so a
-  stale close cannot drop a new window) and in `closeOutput`. `startNDI`
-  fails with `NDI output needs the live window` when `a.live == nil`; it
-  never falls back to the console window. Start, present and stop NDI from
+- **The stage is the output, and NDI publishes only it.** The feed is
+  drawn, not captured: `ndi_render.go` runs `ui.Render` over `a.liveView`
+  on the main thread and hands the sender a BGRA frame, so the feed shows
+  the slide whatever the stage window is doing — closed, behind the
+  console, or on another display. The window is `Frameless`, so the slide
+  fills it; the slide columns are `DragWindow()` handles so a windowed
+  output can still be moved. `a.live` is created by `openOutput` and nilled
+  in its `OnClosed` (guarded so a stale close cannot drop a new window) and
+  in `closeOutput`. Publishing does not need it: `startNDI` never reads
+  `a.live`, and closing the stage keeps the source running. Only sign-out
+  and the NDI switch stop it. Start, present and stop NDI from
   main-thread callbacks only.
+- **The feed never crops and never drags Stop down.** The stage is laid out
+  at 1280×720 (`ndiStageWidth`/`ndiStageHeight`) and drawn at the scale the
+  frame needs, so a larger or oddly shaped frame is the whole slide made
+  bigger, then averaged down; `shrinkFrame` must never take its crop path
+  for a size `ndiRenderSize` allows. The frame loop selects on the stream's
+  stop channel while a helper goroutine posts the draw: `mygo.RunOnMain`
+  blocks its caller until the loop runs the function, so the loop must not
+  be the one waiting on it, and the posted closure re-checks `stopped`
+  before and after drawing so no frame outlives the stream.
 - **The monitor never reaches the room by itself.**
   `selectSlide`/`nextSlide`/`prevSlide` move `a.preview`; only
   `takeSlide` (Go Live, Enter on the list, Cmd/Ctrl+Enter) and the stage
@@ -85,7 +98,8 @@ identity rules live in
   nil `a.live` before `Close()` — a `Close()` whose `OnClosed` guard has
   already been satisfied never destroys the window.
 - **Settings persistence is the only persistence.**
-  `settings.go` reads and writes `settings.json` (display ID, NDI on/off)
+  `settings.go` reads and writes `settings.json` (display ID, NDI on/off,
+  NDI frame size)
   in `mygo.App.Path(mygo.PathUserData)`. `a.settingsDir` is empty until
   `WhenReady` and in tests, and `saveSettings` then does nothing. The run
   of show is session-only; do not persist it unasked.
@@ -94,27 +108,27 @@ identity rules live in
 - **NDI output stays pure Go, and the binding lives in one file.**
   `ndi_sender.go` (`//go:build darwin || linux || windows`) owns the
   library-facing half — runtime discovery, binding, sender lifecycle, the
-  frame loop — for every platform. Each platform file supplies only the
-  dynamic-library calls and the window capture: `ndi_darwin.go` uses
-  `purego` plus CoreGraphics, `ndi_windows.go` uses `syscall` plus GDI,
-  `ndi_linux.go` uses `purego` plus GDK. No cgo, no SDK headers, no
-  third-party NDI package. `ndi_other.go` is the stub for the remaining
-  systems and is the only file with `ndiSupported() == false`. Every
-  platform reads native window objects, so touch them on the main thread
-  only: Linux goes through `mygo.RunOnMain` for each frame, because GDK is
-  not thread safe. `ndi_windows_test.go` pins the struct offsets the C ABI
-  requires; `ndi_sender_test.go` pins the versioned table's indices against
-  a real runtime. Run `GOOS=windows go vet ./...` and
+  frame loop — for every platform. Frames come from an `ndiFrameSource`, not
+  from a window: `ndi_render.go` is the only source, and `(*app)
+  stageSourceFor` picks it. Each platform file supplies only the
+  dynamic-library calls: `ndi_darwin.go` uses `purego`, `ndi_windows.go`
+  uses `syscall`, `ndi_linux.go` uses `purego`. No cgo, no SDK headers, no
+  third-party NDI package. `ndi_other.go` and `ndi_render_stub.go` are the
+  stubs for the remaining systems and are the only files with
+  `ndiSupported() == false`; keep `GOOS=freebsd CGO_ENABLED=0 go build ./...`
+  compiling, which is what `stageSourceFor`'s stub is for.
+  `ndi_windows_test.go` pins the struct offsets the C ABI requires;
+  `ndi_sender_test.go` pins the versioned table's indices against a real
+  runtime. Run `GOOS=windows go vet ./...` and
   `GOOS=linux go vet ./...` before trusting a change there. Resolve the
   runtime through that table first — NDI 6 runtimes do not export the
   individual functions, and `NDIlib_send_create_v2` no longer exists in the
-  SDK (the export is `NDIlib_send_create`). On macOS the capture only works
-  while the window is on screen; that limit is the window server's, so
-  report it instead of working around it, and do not add an AppKit pixel
-  readback — objc struct-return through `purego` crashed. macOS captures
-  at the display's pixel density and `ndiFrameSize` scales the frame down
-  to at most 1920×1080 (`ndi_darwin_test.go` pins that rule); Windows and
-  Linux send the window's own client pixels.
+  SDK (the export is `NDIlib_send_create`). `ndiFrameSize` fits a frame into
+  1920×1080 keeping its aspect (`ndi_darwin_test.go` pins that rule), and
+  the app asks for 720p by default or 1080p from Settings (`a.ndiFrameSize`).
+  Do not bring back a window capture: it needed the window on screen, which
+  is exactly what a single-monitor machine cannot give it, and the AppKit
+  pixel readback crashed through `purego`.
 
 ## Commands
 
@@ -127,7 +141,7 @@ go vet ./...                     # the real vet gate for this module
 test -z "$(gofmt -l *.go)"       # CI formatting gate
 CGO_ENABLED=0 go test ./...      # view, deck and output tests, headless via ui.NewTester
 go run .                         # opens the console for a manual check
-MYGO_NDI=1 go run .              # ...and starts NDI when the output opens
+MYGO_NDI=1 go run .              # ...and publishes the stage over NDI
 bun run build                    # packages the app into build/
 bun run build -- -platform darwin/arm64,darwin/amd64
 git tag -a v0.2.0-beta.1 -m "..." && git push origin v0.2.0-beta.1   # publishes a release
@@ -160,23 +174,26 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `help.go` | The Help window: about, keyboard table, NDI notes, sample-data notes. |
 | `view_test.go` | Headless console tests: login gate, library, add/search, monitor vs stage (click, Go Live, Enter, Cmd+Enter), arrows, blackout, empty deck, sign out. |
 | `menu_test.go` | Headless menu structure: item IDs, accelerator, click handlers present (clicks not run). |
-| `settings_test.go` | Settings round-trip, missing/corrupt defaults, legacy `outputDisplay` migration, `stageDisplayFound`, the Settings page rendering, display refresh without reopening the stage. |
+| `settings_test.go` | Settings round-trip (display, NDI, frame size), missing/corrupt defaults, legacy `outputDisplay` migration, `stageDisplayFound`, the Settings page rendering, display refresh without reopening the stage. |
 | `deck_test.go` | Headless model tests: data reachability, ids, clamping, reorder, blackout, `changed()` without windows. |
-| `output_test.go` | Headless stage tests: the stage slide (not the monitor), next/prev move both, blackout hides text, stage shortcuts, NDI waits for the stage or clears the preference. |
+| `output_test.go` | Headless stage tests: the stage slide (not the monitor), next/prev move both, blackout hides text, stage shortcuts, NDI publishing with no window, closing the stage keeping it, sign-out stopping it, the status line, and the frame size. |
 | `ndi_sender.go` | The NDI half every platform shares: candidate walk, versioned-table binding with a named-export fallback, `startNDISender`, the frame loop, `Stop`, and the `ndiStats` counters `snapshot` reports. |
 | `ndi_stats_test.go` | The stats counters and rate without a runtime; skips where NDI is not built. |
 | `ndi_sender_test.go` | Proves the table indices (0/8/9/50) match the functions a real installed runtime also exports by name; skips without NDI. |
-| `ndi_darwin.go` | `purego` dlopen/dlsym plus `CGWindowListCreateImage` capture of the frameless live window at the display's pixel density, capped to 1920×1080 by `ndiFrameSize`, on screen only. |
-| `ndi_windows.go` | The NDI sender: `syscall` binding of the NDI DLL plus GDI `PrintWindow` capture into a 32-bit DIB. |
+| `ndi_darwin.go` | The `purego` dynamic-library calls: dlopen candidates, dlsym, the runtime's own functions. No capture, no window handle. |
+| `ndi_windows.go` | The `syscall` dynamic-library calls into the NDI DLL. No capture, no window handle. |
 | `ndi_windows_test.go` | Pins the offsets of `ndiVideoFrame`/`ndiSendCreate` to what the C ABI declares; runs on the Windows CI job. |
-| `ndi_linux.go` | `purego` dlopen/dlsym plus `gdk_pixbuf_get_from_window` capture, marshalled onto the main thread with `mygo.RunOnMain`. |
-| `ndi_other.go` | The stub for every remaining system: compiles the app, hides the toggle and ignores a start. |
-| `README.md` | What a downloader needs: installers, the demo account, running a service, shortcuts, and the per-platform NDI instructions. |
+| `ndi_linux.go` | The `purego` dynamic-library calls into the NDI library. No capture, no window handle. |
+| `ndi_other.go` | The stub for every remaining system: `ndiSupported() == false`, a no-op stream and a sender that always fails. |
+| `ndi_render.go` | The feed's only frame source: `renderFrame` (RGBA to BGRA), `ndiFrameSize`/`ndiRenderSize` (the HD cap), `renderStageFrame` (the `ui.Render` draw), `shrinkFrame`, and `stageSource` with its main-thread handoff. |
+| `ndi_render_stub.go` | The same size functions and `stageSourceFor` for the builds without a sender, so `main.go` compiles everywhere. |
+| `ndi_source_test.go` | The rendered feed: BGRA order, the size cap, the whole slide at odd and large sizes, a blacked-out frame, following the stage, and Stop not waiting on a draw. |
+| `README.md` | What a downloader needs: installers, the demo account, running a service, shortcuts, and the per-platform NDI instructions (the runtime, not a window, is what NDI needs). |
 | `mygo.config.ts` | Packaging: name, identifier, version, output directory. `devUrl`, `devCommand`, `buildCommand` and `frontendDist` are inert for a native view. |
 | `src/`, `index.html`, `vite.config.ts` | Leftover web template; nothing renders it. |
 | `.github/workflows/ci.yml` | The test gate, a native Windows run that launches the binary, the macOS/Windows/Linux packaging matrix, and a release job on `v*` tags. |
 | `docs/architecture.md` | How the app works; read this next. |
-| `docs/superpowers/plans/` | Historical plans: the 0.2.0 worship presenter, the monitor/Settings beta, and the stage/Settings fix in beta.4. |
+| `docs/superpowers/plans/` | Historical plans: the 0.2.0 worship presenter, the monitor/Settings beta, the stage/Settings fix in beta.4, and the rendered NDI feed in beta.5. |
 
 ## Known state, deliberately untouched
 

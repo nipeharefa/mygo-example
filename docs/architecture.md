@@ -51,6 +51,8 @@ element or a context:
 | `openStage`, `statsWanted bool` | what the current frame asked for: open the stage after it is built, keep the stats timer running |
 | `newWindow`, `mainScreen` | seams over `mygo.NewWindow` and `mygo.Screen.Displays`, so logic is testable without an application |
 | `ndiOn bool`, `ndi *ndiStream`, `ndiErr string` | NDI preference, sender and last error |
+| `ndiResolution int` | frame size: `ndiResolution720` (default) or `ndiResolution1080` |
+| `drawWait time.Duration` | a test hook: a delay inside the drawn feed, so Stop can be proven not to wait for a draw |
 | `settingsDir string`, `version string` | where `settings.json` lives and what Help reports |
 
 `newApp()` picks the first pack and seeds the deck with Amazing Grace and
@@ -163,13 +165,14 @@ fullscreen when `a.live.IsFullScreen()` and closes the output otherwise —
 the only way out of a window with no title bar.
 
 `openOutput` when a window already exists just calls `Show()` and
-`Focus()`. `shutStage` nils `a.live` first, stops NDI and invalidates the
-console; `OnClosed` calls it guarded with `if a.live != live { return }`,
-so a late close event cannot clear a window that was reopened meanwhile.
-Nilling before `Close()` matters: a `Close()` whose `OnClosed` guard is
-already satisfied never reaches the backend's `destroy()`.
-`closeOutput` = `shutStage`, then leave fullscreen, then `Close()`. If
-`a.ndiOn` is set, `openOutput` starts NDI right after the window exists.
+`Focus()`. `shutStage` nils `a.live` first and invalidates the console;
+`OnClosed` calls it guarded with `if a.live != live { return }`, so a late
+close event cannot clear a window that was reopened meanwhile. Nilling
+before `Close()` matters: a `Close()` whose `OnClosed` guard is already
+satisfied never reaches the backend's `destroy()`. `closeOutput` =
+`shutStage`, then leave fullscreen, then `Close()`. The stage is a viewer
+only: NDI does not start with it and does not stop with it (see "NDI
+output"), so a feed can run with no stage window at all.
 
 The stage opens once and stays there. Nothing reopens it from a display
 notification: `refreshDisplays` saves a preference whose display went away
@@ -188,10 +191,13 @@ radios (**Windowed on this screen** plus one per display, each with label,
 role and size), the NDI switch and status line, the **NDI stream** stats,
 and a short data note. Choosing a display or toggling NDI saves
 immediately; a display change reopens an open stage on the new display.
+The **Stage output size** radios (720p, the default, or 1080p) go through
+`ndiResolutionChanged`, which saves and restarts a running sender at the
+new size.
 
 The stats are the sender's own: resolution and measured frame rate of the
-last frame, frames sent, frames skipped when the capture missed, up time
-and the last error, from `ndiStream.snapshot()`. NDI 5 and 6 expose no
+last frame, frames sent, frames skipped when a draw was not ready in time,
+up time and the last error, from `ndiStream.snapshot()`. NDI 5 and 6 expose no
 receiver tally, so this describes the stream, not its audience. While the
 page is open and NDI is publishing, `console.go` sets `statsWanted` for the
 frame and `tickStats` re-arms a one-second `time.AfterFunc` that
@@ -207,29 +213,52 @@ native about panel on macOS and this window elsewhere.
 
 ## NDI output
 
-NDI publishes the **live window**, never the console. `startNDI` returns an
-error and sets the header strip when `a.live == nil`, so the operator sees
-`NDI output needs the live window` instead of a silent failure; when the
-window exists it calls `startNDISender(a.live)`.
+NDI publishes the **stage slide**, never the console and never a window.
+The feed is drawn: `ndi_render.go` runs `ui.Render(a.liveView, …)` over the
+stage view on the main thread and turns the result into the BGRA frame the
+sender sends. Nothing reads window pixels, so the feed is identical on
+every platform, needs no second monitor, and keeps running with the stage
+window closed, behind the console, or on another Space. `startNDI` never
+looks at `a.live`.
+
+The frame path, in three layers:
+
+- `startNDISender(a.stageSourceFor, w, h)` builds the sender, asks
+  `stageSourceFor` for an `ndiFrameSource` bound to the stream's stop
+  channel, and pulls the first frame before it reports success — a source
+  that cannot draw is an error for the caller, not a silent stream.
+- `stageSource.frame(w, h)` runs in the sender's frame loop. It hands the
+  draw to the main thread with `mygo.RunOnMain` from a helper goroutine and
+  selects on the stream's stop channel, so **Stop never waits for a draw**:
+  `mygo.RunOnMain` blocks its caller until the loop runs the function, and
+  a frame loop waiting on that would deadlock its own Stop.
+- `renderStageFrame` draws `a.liveView` at a fixed 1280×720 layout
+  (`ndiStageWidth`/`ndiStageHeight`) with a scale that covers the requested
+  frame, then `shrinkFrame` averages it down to the frame size. The stage
+  stays laid out for 16:9, so no frame size crops the slide;
+  `TestRenderStageFrameFitsAnOddLargerFrame` pins that for odd and larger
+  requests.
+
+`ndiFrameSize` caps a request at 1920×1080 without upscaling;
+`a.ndiFrameSize` asks for 1280×720 or 1920×1080 from the saved preference.
+`renderFrame` reorders the rendered RGBA into BGRA, top row first, stride
+`4*W`, because the NDI frame is bottom-up only when asked to be — it is not
+here, so the top row goes first. (A two-byte Go swap `dst[q],
+dst[q+2] = src[q+2], src[q]` compiled to a wrong result on Go 1.27.3
+darwin/arm64; `bgrA` names all four bytes and `TestRenderBGRA` pins it.)
 
 The platform split is described in `AGENTS.md`: `ndi_sender.go` owns
 runtime discovery, the versioned function table, the sender and the frame
-loop; `ndi_darwin.go`, `ndi_windows.go` and `ndi_linux.go` only bind the
-library and capture the live window (CoreGraphics, GDI, GDK). The source
-is registered as `mygo-demo (Live)`.
+loop; `ndi_darwin.go`, `ndi_windows.go` and `ndi_linux.go` only make the
+dynamic-library calls (purego on macOS and Linux, `syscall` on Windows).
+The source is registered as `mygo-demo (Live)` (`stageSourceName`).
 
-The feed is the slide alone, at the capture's own pixel size capped to HD.
-macOS captures the frameless window at the display's pixel density
-(`cgWindowImageBestResolution`) and `ndiFrameSize` scales it down to at
-most 1920×1080 without upscaling, so a Retina window streams crisp 1080p;
-Windows and Linux send the window's client pixels at its DPI.
-
-`MYGO_NDI=1` sets `a.ndiOn` for the session so opening the stage starts
-streaming immediately; the Settings switch and the console header button
-both go through `setNDI`, which saves the preference, starts the sender
-when a stage exists, and stops it otherwise. Closing the stage stops the
-sender through the same paths as **Stop NDI** and sign-out; turning NDI on
-with no stage open records the preference and waits for one to open.
+`MYGO_NDI=1` sets `a.ndiOn` for the session so the sender starts at launch;
+the Settings switch and the console header button both go through
+`setNDI`, which saves the preference and starts or stops the sender. Only
+`setNDI` and sign-out stop it: closing the stage keeps publishing,
+`restartNDI` bounces a running sender when the frame size changes, and
+quitting the app unregisters it through `mygo.App.OnQuit(a.stopNDI)`.
 
 ## Themes
 
@@ -345,7 +374,8 @@ CGO_ENABLED=0 go test ./...
 Then `go run .` for the manual check: sign in, add/remove/move slides, use
 the arrows, black out, open the output (fullscreen with a second display),
 change slides, leave fullscreen with Esc, and with `MYGO_NDI=1` check that
-the NDI source follows the output and stops when it closes. On a sandboxed
+the NDI source follows the stage with the stage window closed too, and that
+sign-out stops it. On a sandboxed
 agent session, prefix Go commands with `GOCACHE="$TMPDIR/gocache-mygo-demo"`.
 
 ## Known drift and gaps
@@ -365,10 +395,11 @@ agent session, prefix Go commands with `GOCACHE="$TMPDIR/gocache-mygo-demo"`.
   `src/mygo.ts` predate the native UI. `dist/` is still built and embedded,
   but no window loads it. `package.json` pins the web tooling at 0.7.x
   while `go.mod` pins MyGo v0.10.0.
-- **NDI is per platform.** macOS needs the output window on screen and the
-  NDI runtime at `/usr/local/lib/libndi.dylib`; Windows uses the x64 DLL
-  from NDI 6; Linux captures through GDK, so X11 works and Wayland reports
-  that it cannot read its own pixels.
+- **NDI needs the runtime, not a window.** macOS needs
+  `/usr/local/lib/libndi.dylib`, Windows the x64 DLL from NDI 5 or 6, and
+  Linux `/usr/local/lib/libndi.so`; nothing is captured, so one monitor,
+  Wayland and a closed stage all work. A sandboxed agent session still
+  cannot eyeball the feed in OBS or NDI Video Monitor.
 - **The console shortcuts are small.** ← / → for the monitor, B for
   blackout, Cmd/Ctrl+Enter to go live, Enter on the list; everything else
   is a button or a menu item.
