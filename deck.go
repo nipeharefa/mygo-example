@@ -64,11 +64,16 @@ func (a *app) newSlide(title, section, text string, kind slideKind, size float64
 	return s
 }
 
+// songByID looks in the active library, which the editor can change.
+func (a *app) songByID(id string) (song, bool) {
+	return findSong(a.songs, id)
+}
+
 // addSong appends every slide of the song, part by part, and moves the
 // monitor to its first slide. The stage is untouched until the operator
 // takes it.
 func (a *app) addSong(id string) {
-	s, ok := songByID(id)
+	s, ok := a.songByID(id)
 	if !ok {
 		return
 	}
@@ -109,7 +114,7 @@ func (a *app) addPartSlides(s song, part songPart) int {
 // addPart appends one named part of a song to the run of show, so a chorus
 // can come back without adding the whole song again.
 func (a *app) addPart(id string, part int) bool {
-	s, ok := songByID(id)
+	s, ok := a.songByID(id)
 	if !ok || part < 0 || part >= len(s.Parts) {
 		return false
 	}

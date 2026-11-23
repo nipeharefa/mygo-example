@@ -136,6 +136,7 @@ func (a *app) topBar(c *ui.Context) {
 			}
 		}
 		ui.Button(c, "Check for Updates").OnClick(a.checkForUpdates)
+		ui.Button(c, "Song editor").OnClick(a.requestEditor)
 		ui.Button(c, "Settings").Label("Settings").OnClick(a.showSettings)
 		ui.Button(c, "Sign out").OnClick(a.signOut)
 	})
@@ -177,7 +178,7 @@ func (a *app) songLibrary(c *ui.Context) {
 		ui.Scroll(c).Grow(1).Children(func() {
 			ui.Column(c).Gap(6).Padding(0, 12, 12).Children(func() {
 				found := false
-				for _, s := range builtinSongs {
+				for _, s := range a.songs {
 					if !songMatches(s, a.songQuery) {
 						continue
 					}

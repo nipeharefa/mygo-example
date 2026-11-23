@@ -64,9 +64,16 @@ type app struct {
 	newWindow  func(mygo.WindowOptions) *mygo.Window
 	mainScreen func() []mygo.Display
 
-	help        *mygo.Window
-	settingsDir string // app data dir; empty keeps tests headless
-	version     string // mygo.App.Version(); empty under go run
+	help         *mygo.Window
+	editor       *mygo.Window
+	openEditor   bool // the frame asked for the editor window
+	editSong     int  // selection in a.songs
+	editPart     int
+	editSlide    int
+	editorStatus string
+	editQuery    string
+	settingsDir  string // app data dir; empty keeps tests headless
+	version      string // mygo.App.Version(); empty under go run
 
 	// Updates, as the Help menu offers them: the context a check runs under
 	// (so quitting cancels it), whether this build can replace itself, and
@@ -121,6 +128,7 @@ func newApp() *app {
 		updateRun: func() { mygo.App.Relaunch() },
 	}
 	a.songs = cloneSongs(builtinSongs)
+	a.editSong, a.editPart, a.editSlide = -1, -1, -1
 	a.addSong("amazing-grace")
 	a.addVerse("Psalm 23:1")
 	a.preview, a.stage = 0, 0
@@ -146,6 +154,8 @@ func (a *app) signOut() {
 	a.closeOutput()
 	a.stopNDI()
 	a.closeHelp()
+	a.closeEditor()
+	a.openEditor = false
 	a.page = pageConsole
 	a.signedIn = false
 	a.password = ""
@@ -172,6 +182,9 @@ func (a *app) changed() {
 	if a.help != nil {
 		a.help.Invalidate()
 	}
+	if a.editor != nil {
+		a.editor.Invalidate()
+	}
 }
 
 // requestStage opens the stage from the next frame: a window has to come
@@ -187,6 +200,12 @@ func (a *app) requestStage() {
 // Context.After while openStage is set) so the console draws the frame it
 // asked for before a new window works takes the main thread.
 func (a *app) settle() {
+	if a.openEditor {
+		a.openEditor = false
+		if a.win != nil && a.editor == nil {
+			a.openEditorWindow()
+		}
+	}
 	if a.openStage {
 		a.openStage = false
 		if a.win != nil && a.live == nil {

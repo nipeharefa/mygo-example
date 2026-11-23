@@ -262,11 +262,6 @@ func findSong(list []song, id string) (song, bool) {
 	return song{}, false
 }
 
-// songByID is the built-in library's lookup until the app carries its own.
-func songByID(id string) (song, bool) {
-	return findSong(builtinSongs, id)
-}
-
 func verseByRef(ref string) (verse, bool) {
 	for _, p := range packs {
 		for _, v := range p.Verses {
