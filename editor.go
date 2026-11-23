@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/egoist/mygo"
@@ -117,8 +118,8 @@ func (a *app) editorList(c *ui.Context) {
 	})
 }
 
-// editorMain is the right column: the selected song and its preview. The
-// metadata and parts editors hang off this same column.
+// editorMain is the right column: the selected song's metadata, text size,
+// preview, parts and slide text.
 func (a *app) editorMain(c *ui.Context) {
 	t := c.Theme()
 	ui.Scroll(c).Fill().Grow(1).Children(func() {
@@ -127,10 +128,33 @@ func (a *app) editorMain(c *ui.Context) {
 			ui.Text(c, "Select a song to edit.").FontSize(12).TextColor(t.TextMuted)
 			return
 		}
+		i := a.editSong
+		width, _ := c.Size()
 		ui.Column(c).Gap(12).Children(func() {
-			ui.Text(c, s.Title).FontSize(18).FontWeight(600).SingleLine()
-			width, _ := c.Size()
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, s.Title).FontSize(18).FontWeight(600).SingleLine()
+				ui.Spacer(c)
+				ui.Button(c, "Remove song").OnClick(a.removeSong)
+			})
+			ui.Text(c, "Metadata").FontSize(10).FontWeight(600).LetterSpacing(0.8).TextColor(t.TextMuted).SingleLine()
+			ui.Row(c).Gap(10).Children(func() {
+				ui.TextInput(c, &a.songs[i].Title).Label("Song title input").Grow(1).OnChange(a.songEdited)
+				ui.TextInput(c, &a.songs[i].Author).Label("Song author input").Width(220).OnChange(a.songEdited)
+				ui.TextInput(c, &a.songs[i].Key).Label("Song key input").Width(80).OnChange(a.songEdited)
+			})
+			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "Text size").FontSize(11).SingleLine()
+				ui.Slider(c, &a.songs[i].TextSize, minTextSize, maxTextSize).Step(1).Label("Text size").OnChange(func() {
+					a.setTextSize(a.songs[i].TextSize)
+				})
+				ui.Text(c, fmt.Sprintf("%.0f", a.songs[i].textSize())).FontSize(11).SingleLine()
+			})
 			a.editorPreview(c, previewWidth(width))
+			a.editorParts(c)
+			a.editorSlideText(c)
+			if a.editorStatus != "" {
+				ui.Text(c, a.editorStatus).FontSize(11).TextColor(t.TextMuted)
+			}
 		})
 	})
 }
@@ -235,4 +259,231 @@ func (a *app) songSlide() (slide, bool) {
 		Kind:     slideSong,
 		TextSize: s.textSize(),
 	}, true
+}
+
+// editorParts lists the song's parts and their slides. Every control acts on
+// the row it sits in by selecting it first, so a click always lands on what
+// the operator saw.
+func (a *app) editorParts(c *ui.Context) {
+	t := c.Theme()
+	s, ok := a.selectedSong()
+	if !ok {
+		return
+	}
+	i := a.editSong
+	ui.Column(c).Gap(8).Children(func() {
+		ui.Text(c, "Parts").FontSize(12).FontWeight(600).TextColor(t.TextMuted).SingleLine()
+		for j := range s.Parts {
+			j := j
+			part := a.songs[i].Parts[j]
+			ui.Column(c).Gap(4).Children(func() {
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.TextInput(c, &a.songs[i].Parts[j].Label).Label(fmt.Sprintf("Part label %d", j+1)).Grow(1).OnChange(a.songEdited)
+					ui.Button(c, "Add slide").OnClick(func() { a.selectPart(j); a.addSlide() })
+					ui.Button(c, "Remove part").OnClick(func() { a.selectPart(j); a.removePart() })
+				})
+				for k, text := range part.Slides {
+					k := k
+					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+						row := ui.Button(c, fmt.Sprintf("Select slide %d", k+1)).OnClick(func() { a.selectEditorSlide(j, k) })
+						if j == a.editPart && k == a.editSlide {
+							row = row.Background(t.Selection)
+						}
+						ui.Text(c, (slide{Text: text}).firstLine()).FontSize(11).TextColor(t.TextMuted).Grow(1).SingleLine()
+						ui.Button(c, "Remove slide").OnClick(func() { a.selectEditorSlide(j, k); a.removeEditorSlide() })
+					})
+				}
+			})
+		}
+		ui.Button(c, "Add part").OnClick(a.addEditorPart)
+	})
+}
+
+// editorSlideText edits the selected slide's text. The area is bound to the
+// library string itself, so what is typed is what a preview and a save see.
+func (a *app) editorSlideText(c *ui.Context) {
+	t := c.Theme()
+	if a.editSong < 0 || a.editSong >= len(a.songs) {
+		return
+	}
+	s := a.songs[a.editSong]
+	if a.editPart < 0 || a.editPart >= len(s.Parts) || a.editSlide < 0 || a.editSlide >= len(s.Parts[a.editPart].Slides) {
+		return
+	}
+	ui.Column(c).Gap(4).Children(func() {
+		ui.Text(c, "Text").FontSize(10).FontWeight(600).LetterSpacing(0.8).TextColor(t.TextMuted).SingleLine()
+		ui.TextArea(c, &a.songs[a.editSong].Parts[a.editPart].Slides[a.editSlide]).Label("Slide text").Height(140).OnChange(a.songEdited)
+	})
+}
+
+// selectPart moves the editor to a part and its first slide.
+func (a *app) selectPart(j int) {
+	if j < 0 || j >= len(a.songs[a.editSong].Parts) {
+		return
+	}
+	a.editPart = j
+	a.editSlide = 0
+	a.clampEditor()
+	a.changed()
+}
+
+// selectEditorSlide moves the editor to one slide of one part.
+func (a *app) selectEditorSlide(j, k int) {
+	if a.editSong < 0 || a.editSong >= len(a.songs) {
+		return
+	}
+	if j < 0 || j >= len(a.songs[a.editSong].Parts) {
+		return
+	}
+	if k < 0 || k >= len(a.songs[a.editSong].Parts[j].Slides) {
+		return
+	}
+	a.editPart = j
+	a.editSlide = k
+	a.clampEditor()
+	a.changed()
+}
+
+// songEdited clamps the size, saves the whole library and says so. Every text
+// field calls it, so an edit never waits for a Save button.
+func (a *app) songEdited() {
+	if a.editSong < 0 || a.editSong >= len(a.songs) {
+		return
+	}
+	a.songs[a.editSong].TextSize = clampTextSize(a.songs[a.editSong].TextSize)
+	a.saveLibrary()
+	a.editorStatus = "Saved"
+	a.changed()
+}
+
+// setTextSize is the slider's landing point: a size the slider cannot produce
+// is pulled back into its range before it is saved.
+func (a *app) setTextSize(v float64) {
+	if a.editSong < 0 || a.editSong >= len(a.songs) {
+		return
+	}
+	a.songs[a.editSong].TextSize = clampTextSize(v)
+	a.saveLibrary()
+	a.editorStatus = "Saved"
+	a.changed()
+}
+
+// newSong appends an empty draft and selects it.
+func (a *app) newSong() {
+	s := song{
+		ID:       newSongID("New Song", a.songs),
+		Title:    "New Song",
+		TextSize: defaultTextSize,
+		Parts:    []songPart{{Label: "Verse 1", Slides: []string{""}}},
+	}
+	a.songs = append(a.songs, s)
+	a.selectSong(len(a.songs) - 1)
+	a.saveLibrary()
+	a.editorStatus = "New song added"
+	a.changed()
+}
+
+// removeSong deletes the selected song and pulls the selection to a neighbor.
+func (a *app) removeSong() {
+	i := a.editSong
+	if i < 0 || i >= len(a.songs) {
+		return
+	}
+	a.songs = append(a.songs[:i], a.songs[i+1:]...)
+	a.clampEditor()
+	a.saveLibrary()
+	a.editorStatus = "Song removed"
+	a.changed()
+}
+
+// addPart appends an empty part and selects it.
+func (a *app) addEditorPart() {
+	i := a.editSong
+	if i < 0 || i >= len(a.songs) {
+		return
+	}
+	part := songPart{Label: fmt.Sprintf("Part %d", len(a.songs[i].Parts)+1), Slides: []string{""}}
+	a.songs[i].Parts = append(a.songs[i].Parts, part)
+	a.editPart = len(a.songs[i].Parts) - 1
+	a.editSlide = 0
+	a.clampEditor()
+	a.saveLibrary()
+	a.editorStatus = "Part added"
+	a.changed()
+}
+
+// removePart never empties a song: the last part stays with a status note.
+func (a *app) removePart() {
+	i, j := a.editSong, a.editPart
+	if i < 0 || i >= len(a.songs) || j < 0 || j >= len(a.songs[i].Parts) {
+		return
+	}
+	if len(a.songs[i].Parts) <= 1 {
+		a.editorStatus = "A song needs at least one part"
+		a.changed()
+		return
+	}
+	a.songs[i].Parts = append(a.songs[i].Parts[:j], a.songs[i].Parts[j+1:]...)
+	a.clampEditor()
+	a.saveLibrary()
+	a.editorStatus = "Part removed"
+	a.changed()
+}
+
+// addSlide appends an empty slide to the selected part.
+func (a *app) addSlide() {
+	i, j := a.editSong, a.editPart
+	if i < 0 || i >= len(a.songs) || j < 0 || j >= len(a.songs[i].Parts) {
+		return
+	}
+	a.songs[i].Parts[j].Slides = append(a.songs[i].Parts[j].Slides, "")
+	a.editSlide = len(a.songs[i].Parts[j].Slides) - 1
+	a.clampEditor()
+	a.saveLibrary()
+	a.editorStatus = "Slide added"
+	a.changed()
+}
+
+// removeSlide never empties a part: the last slide stays with a status note.
+func (a *app) removeEditorSlide() {
+	i, j, k := a.editSong, a.editPart, a.editSlide
+	if i < 0 || i >= len(a.songs) || j < 0 || j >= len(a.songs[i].Parts) {
+		return
+	}
+	if k < 0 || k >= len(a.songs[i].Parts[j].Slides) {
+		return
+	}
+	if len(a.songs[i].Parts[j].Slides) <= 1 {
+		a.editorStatus = "A part needs at least one slide"
+		a.changed()
+		return
+	}
+	a.songs[i].Parts[j].Slides = append(a.songs[i].Parts[j].Slides[:k], a.songs[i].Parts[j].Slides[k+1:]...)
+	a.clampEditor()
+	a.saveLibrary()
+	a.editorStatus = "Slide removed"
+	a.changed()
+}
+
+// restoreSamples adds any built-in whose id the library lost and never
+// overwrites a song the operator edited.
+func (a *app) restoreSamples() {
+	first := -1
+	for _, b := range builtinSongs {
+		if _, ok := findSong(a.songs, b.ID); ok {
+			continue
+		}
+		a.songs = append(a.songs, cloneSongs([]song{b})[0])
+		if first < 0 {
+			first = len(a.songs) - 1
+		}
+	}
+	if first >= 0 {
+		a.selectSong(first)
+		a.editorStatus = "Samples restored"
+	} else {
+		a.editorStatus = "Samples are already here"
+	}
+	a.saveLibrary()
+	a.changed()
 }

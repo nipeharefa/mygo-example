@@ -130,6 +130,16 @@ func (a *app) normalizeLibrary() {
 		}
 		seen[s.ID] = true
 		s.TextSize = s.textSize()
+		// The editor always needs one part with one slide to stand on; a
+		// hand-edited file may leave either empty.
+		if len(s.Parts) == 0 {
+			s.Parts = []songPart{{Label: "Verse 1", Slides: []string{""}}}
+		}
+		for j := range s.Parts {
+			if len(s.Parts[j].Slides) == 0 {
+				s.Parts[j].Slides = []string{""}
+			}
+		}
 		out = append(out, s)
 	}
 	a.songs = out

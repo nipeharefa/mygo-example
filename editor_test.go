@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -127,5 +128,207 @@ func TestEditorSearchKeepsSelectionStable(t *testing.T) {
 	tt.Click("Edit Holy, Holy, Holy")
 	if a.editSong != 1 {
 		t.Fatalf("editSong = %d, want the real index 1", a.editSong)
+	}
+}
+
+// songIndex is where a song sits in the library, or -1.
+func songIndex(a *app, id string) int {
+	for i := range a.songs {
+		if a.songs[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// editorApp is an app with a saved library in a temp dir and the first song
+// selected, the starting point for the editing tests.
+func editorApp(t *testing.T) *app {
+	t.Helper()
+	a := newApp()
+	a.settingsDir = t.TempDir()
+	a.loadLibrary()
+	a.selectSong(0)
+	return a
+}
+
+func TestEditingTitleSavesLibrary(t *testing.T) {
+	a := editorApp(t)
+	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
+	tt.Click("Song title input")
+	tt.Type(" Grace")
+	want := a.songs[0].Title
+	if !strings.Contains(want, "Grace") {
+		t.Fatalf("title = %q, want the typed text", want)
+	}
+	f, err := readLibrary(a.libraryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Songs[0].Title != want {
+		t.Errorf("saved title = %q, want %q", f.Songs[0].Title, want)
+	}
+}
+
+func TestEditingSlideTextSavesLibrary(t *testing.T) {
+	a := editorApp(t)
+	tt := ui.NewTester(a.editorView, editorWidth, 1600)
+	tt.Click("Slide text")
+	tt.Type("new line")
+	want := a.songs[0].Parts[0].Slides[0]
+	if !strings.Contains(want, "new line") {
+		t.Fatalf("slide text = %q, want the typed text", want)
+	}
+	f, err := readLibrary(a.libraryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Songs[0].Parts[0].Slides[0] != want {
+		t.Errorf("saved slide = %q, want %q", f.Songs[0].Parts[0].Slides[0], want)
+	}
+}
+
+func TestAddPartAddsOneSlide(t *testing.T) {
+	a := editorApp(t)
+	before := len(a.songs[0].Parts)
+	tt := ui.NewTester(a.editorView, editorWidth, 1600)
+	tt.Click("Add part")
+	if len(a.songs[0].Parts) != before+1 {
+		t.Fatalf("parts = %d, want %d", len(a.songs[0].Parts), before+1)
+	}
+	if a.editPart != before || a.editSlide != 0 {
+		t.Errorf("selection = part %d slide %d, want the new part", a.editPart, a.editSlide)
+	}
+	if len(a.songs[0].Parts[before].Slides) != 1 {
+		t.Errorf("new part has %d slides, want 1", len(a.songs[0].Parts[before].Slides))
+	}
+	f, err := readLibrary(a.libraryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Songs[0].Parts) != before+1 {
+		t.Errorf("saved parts = %d, want %d", len(f.Songs[0].Parts), before+1)
+	}
+}
+
+func TestRemovePartKeepsLastPart(t *testing.T) {
+	a := editorApp(t)
+	a.selectSong(songIndex(a, "all-creatures"))
+	tt := ui.NewTester(a.editorView, editorWidth, 1600)
+	tt.Click("Remove part")
+	if len(a.songs[a.editSong].Parts) != 1 {
+		t.Fatalf("parts = %d, want the last part kept", len(a.songs[a.editSong].Parts))
+	}
+	if !strings.Contains(strings.ToLower(a.editorStatus), "part") {
+		t.Errorf("status = %q, want a note about needing a part", a.editorStatus)
+	}
+}
+
+func TestRemoveSlideKeepsLastSlide(t *testing.T) {
+	a := editorApp(t)
+	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
+	tt.Click("Remove slide")
+	if len(a.songs[0].Parts[0].Slides) != 1 {
+		t.Fatalf("slides = %d, want the last slide kept", len(a.songs[0].Parts[0].Slides))
+	}
+	if !strings.Contains(strings.ToLower(a.editorStatus), "slide") {
+		t.Errorf("status = %q, want a note about needing a slide", a.editorStatus)
+	}
+}
+
+func TestSetTextSizeClampsAndSaves(t *testing.T) {
+	a := editorApp(t)
+	f, err := readLibrary(a.libraryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Songs[0].TextSize != defaultTextSize {
+		t.Errorf("seeded size = %v, want %v", f.Songs[0].TextSize, defaultTextSize)
+	}
+	a.setTextSize(99)
+	if got := a.songs[0].TextSize; got != maxTextSize {
+		t.Errorf("size 99 = %v, want %v", got, maxTextSize)
+	}
+	a.setTextSize(10)
+	if got := a.songs[0].TextSize; got != minTextSize {
+		t.Errorf("size 10 = %v, want %v", got, minTextSize)
+	}
+	f, err = readLibrary(a.libraryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Songs[0].TextSize != minTextSize {
+		t.Errorf("saved size = %v, want %v", f.Songs[0].TextSize, minTextSize)
+	}
+}
+
+func TestNewSongIDIsUnique(t *testing.T) {
+	a := editorApp(t)
+	a.newSong()
+	first := a.songs[len(a.songs)-1].ID
+	a.newSong()
+	second := a.songs[len(a.songs)-1].ID
+	if first == second {
+		t.Fatalf("both new songs got id %q", first)
+	}
+	f, err := readLibrary(a.libraryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findSong(f.Songs, first); !ok {
+		t.Error("the first new song is not in the file")
+	}
+	if _, ok := findSong(f.Songs, second); !ok {
+		t.Error("the second new song is not in the file")
+	}
+}
+
+func TestRestoreSamplesOnlyAddsMissing(t *testing.T) {
+	a := editorApp(t)
+	a.songs[0].Title = "My Grace"
+	a.selectSong(0)
+	a.songEdited()
+	a.selectSong(1)
+	gone := a.songs[1].ID
+	a.removeSong()
+
+	a.restoreSamples()
+	if len(a.songs) != len(builtinSongs) {
+		t.Fatalf("songs = %d, want %d", len(a.songs), len(builtinSongs))
+	}
+	if _, ok := findSong(a.songs, gone); !ok {
+		t.Errorf("restore did not bring back %q", gone)
+	}
+	if got := a.songs[0].Title; got != "My Grace" {
+		t.Errorf("restore overwrote the edited title with %q", got)
+	}
+	f, err := readLibrary(a.libraryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Songs) != len(builtinSongs) {
+		t.Errorf("saved songs = %d, want %d", len(f.Songs), len(builtinSongs))
+	}
+}
+
+func TestRemoveSong(t *testing.T) {
+	a := editorApp(t)
+	gone := a.songs[0].ID
+	a.removeSong()
+	if len(a.songs) != len(builtinSongs)-1 {
+		t.Fatalf("songs = %d, want one fewer", len(a.songs))
+	}
+	if _, ok := findSong(a.songs, gone); ok {
+		t.Errorf("song %q is still in the model", gone)
+	}
+	if a.editSong != 0 {
+		t.Errorf("editSong = %d, want 0", a.editSong)
+	}
+	f, err := readLibrary(a.libraryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findSong(f.Songs, gone); ok {
+		t.Errorf("song %q is still in the file", gone)
 	}
 }
