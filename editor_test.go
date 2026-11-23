@@ -61,3 +61,71 @@ func TestConsoleSongEditorButton(t *testing.T) {
 		t.Error("the editor button signed the operator out")
 	}
 }
+
+func TestEditorEmptyLibrary(t *testing.T) {
+	a := newApp()
+	a.songs = nil
+	a.editSong, a.editPart, a.editSlide = -1, -1, -1
+	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
+	if !tt.HasText("No songs yet") {
+		t.Errorf("empty editor does not say No songs yet: %q", tt.Texts())
+	}
+	if !tt.HasText("New song") {
+		t.Error("empty editor has no New song button")
+	}
+}
+
+func TestEditorSelectsSong(t *testing.T) {
+	a := newApp()
+	a.editSong, a.editPart, a.editSlide = -1, -1, -1
+	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
+	tt.Click("Edit Amazing Grace")
+	if a.editSong != 0 {
+		t.Fatalf("editSong = %d, want 0", a.editSong)
+	}
+	line := (slide{Text: a.songs[0].Parts[0].Slides[0]}).firstLine()
+	if !tt.HasText(line) {
+		t.Fatalf("preview does not show %q: %q", line, tt.Texts())
+	}
+}
+
+func TestEditorPreviewShowsSlideParts(t *testing.T) {
+	a := newApp()
+	a.selectSong(0)
+	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
+	line := (slide{Text: a.songs[0].Parts[0].Slides[0]}).firstLine()
+	if !tt.HasText("VERSE 1") {
+		t.Errorf("preview has no eyebrow: %q", tt.Texts())
+	}
+	if !tt.HasText(line) {
+		t.Errorf("preview has no first line %q", line)
+	}
+	if !tt.HasText("Amazing Grace · Verse 1") {
+		t.Errorf("preview has no caption: %q", tt.Texts())
+	}
+}
+
+func TestEditorPreviewWidthClamped(t *testing.T) {
+	a := newApp()
+	a.selectSong(0)
+	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
+	tt.Frame()
+	if got := previewWidth(editorWidth); got != editorPreviewMax {
+		t.Errorf("preview at %d = %v, want %v", editorWidth, got, editorPreviewMax)
+	}
+	if got := previewWidth(900); got < 320 {
+		t.Errorf("preview at 900 = %v, want at least 320", got)
+	}
+}
+
+func TestEditorSearchKeepsSelectionStable(t *testing.T) {
+	a := newApp()
+	a.editSong, a.editPart, a.editSlide = -1, -1, -1
+	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
+	tt.Click("Search songs")
+	tt.Type("holy")
+	tt.Click("Edit Holy, Holy, Holy")
+	if a.editSong != 1 {
+		t.Fatalf("editSong = %d, want the real index 1", a.editSong)
+	}
+}
