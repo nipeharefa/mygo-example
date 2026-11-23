@@ -134,6 +134,7 @@ func (a *app) editorMain(c *ui.Context) {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, s.Title).FontSize(18).FontWeight(600).SingleLine()
 				ui.Spacer(c)
+				ui.Button(c, "Add song to run of show").OnClick(a.addEditorSongToDeck)
 				ui.Button(c, "Remove song").OnClick(a.removeSong)
 			})
 			ui.Text(c, "Metadata").FontSize(10).FontWeight(600).LetterSpacing(0.8).TextColor(t.TextMuted).SingleLine()
@@ -279,6 +280,7 @@ func (a *app) editorParts(c *ui.Context) {
 			ui.Column(c).Gap(4).Children(func() {
 				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 					ui.TextInput(c, &a.songs[i].Parts[j].Label).Label(fmt.Sprintf("Part label %d", j+1)).Grow(1).OnChange(a.songEdited)
+					ui.Button(c, "Add part to run of show").OnClick(func() { a.selectPart(j); a.addEditorPartToDeck() })
 					ui.Button(c, "Add slide").OnClick(func() { a.selectPart(j); a.addSlide() })
 					ui.Button(c, "Remove part").OnClick(func() { a.selectPart(j); a.removePart() })
 				})
@@ -486,4 +488,47 @@ func (a *app) restoreSamples() {
 	}
 	a.saveLibrary()
 	a.changed()
+}
+
+// addEditorSongToDeck sends every part of the selected song to the run of
+// show, in part order, and moves the monitor to the first added slide.
+func (a *app) addEditorSongToDeck() {
+	s, ok := a.selectedSong()
+	if !ok {
+		return
+	}
+	n := a.addSongParts(s)
+	if n == 0 {
+		a.editorStatus = "This song has no text yet"
+		a.changed()
+		return
+	}
+	a.editorStatus = addedSlidesNote(n)
+	a.changed()
+}
+
+// addEditorPartToDeck sends only the selected part, so a chorus can follow
+// the verse it belongs to without adding the whole song again.
+func (a *app) addEditorPartToDeck() {
+	s, ok := a.selectedSong()
+	if !ok || a.editPart < 0 || a.editPart >= len(s.Parts) {
+		return
+	}
+	n := a.addPartSlides(s, s.Parts[a.editPart])
+	if n == 0 {
+		a.editorStatus = "This part has no text yet"
+		a.changed()
+		return
+	}
+	a.preview = len(a.deck) - n
+	a.editorStatus = addedSlidesNote(n)
+	a.changed()
+}
+
+// addedSlidesNote says what the last add put in the run of show.
+func addedSlidesNote(n int) string {
+	if n == 1 {
+		return "Added 1 slide"
+	}
+	return fmt.Sprintf("Added %d slides", n)
 }

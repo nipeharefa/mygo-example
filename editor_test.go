@@ -332,3 +332,67 @@ func TestRemoveSong(t *testing.T) {
 		t.Errorf("song %q is still in the file", gone)
 	}
 }
+
+func TestAddSongToRunOfShow(t *testing.T) {
+	a := editorApp(t)
+	before := len(a.deck)
+	tt := ui.NewTester(a.editorView, editorWidth, 1600)
+	tt.Click("Add song to run of show")
+	if len(a.deck) != before+3 {
+		t.Fatalf("deck = %d, want %d", len(a.deck), before+3)
+	}
+	if a.preview != before {
+		t.Errorf("preview = %d, want the first added slide %d", a.preview, before)
+	}
+	if a.editorStatus != "Added 3 slides" {
+		t.Errorf("status = %q, want Added 3 slides", a.editorStatus)
+	}
+}
+
+func TestAddSongWithNoTextDoesNothing(t *testing.T) {
+	a := editorApp(t)
+	a.songs[0].Parts = []songPart{{Label: "Verse 1", Slides: []string{"", "  "}}}
+	a.selectSong(0)
+	before := len(a.deck)
+	a.addEditorSongToDeck()
+	if len(a.deck) != before {
+		t.Fatalf("deck = %d, want the blank song to add nothing", len(a.deck))
+	}
+	if !strings.Contains(strings.ToLower(a.editorStatus), "no text") {
+		t.Errorf("status = %q, want a note about missing text", a.editorStatus)
+	}
+}
+
+func TestAddPartToRunOfShow(t *testing.T) {
+	a := editorApp(t)
+	stage := a.stage
+	a.selectSong(songIndex(a, "amazing-grace"))
+	a.selectPart(1)
+	before := len(a.deck)
+	a.addEditorPartToDeck()
+	if len(a.deck) != before+1 {
+		t.Fatalf("deck = %d, want one slide added", len(a.deck))
+	}
+	if got := a.deck[len(a.deck)-1].Section; got != "Verse 2" {
+		t.Errorf("section = %q, want Verse 2", got)
+	}
+	if a.stage != stage {
+		t.Errorf("stage = %d, want it untouched at %d", a.stage, stage)
+	}
+}
+
+func TestEditingSongLeavesDeckUntouched(t *testing.T) {
+	a := editorApp(t)
+	a.selectSong(songIndex(a, "amazing-grace"))
+	a.addEditorSongToDeck()
+	added := a.deck[len(a.deck)-3]
+	oldText, oldSize := added.Text, added.TextSize
+	a.songs[a.editSong].Parts[0].Slides[0] = "rewritten"
+	a.setTextSize(60)
+	if got := a.deck[len(a.deck)-3].Text; got != oldText {
+		t.Errorf("deck text = %q, want the snapshot %q", got, oldText)
+	}
+	if got := a.deck[len(a.deck)-3].TextSize; got != oldSize {
+		t.Errorf("deck size = %v, want the snapshot %v", got, oldSize)
+	}
+}
