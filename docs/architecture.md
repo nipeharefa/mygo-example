@@ -138,7 +138,9 @@ the three-column body.
 - **Run of show** (grow) — heading, slide count, and **Move up** /
   **Move down** / **Remove** (disabled where they cannot act), then either
   an empty state or the `ui.List` of `deckRow`s. A row shows its position,
-  caption and first line; clicking it selects the slide.
+  the title, and a second line: for a song slide the part label and the first
+  line (`Verse 1 · ...`), for a verse just the first line. Clicking it selects
+  the slide.
 - **Stage panel** (344 wide, `Surface`) — two 16:9 cards drawn in the
   stage theme: **STAGE · LIVE** (what the room sees, with `n / total`) and
   **MONITOR · PREVIEW** (the row selected in the run of show), then **Go
@@ -240,7 +242,9 @@ preview, the selected slide's text, the selected part's label, and the song's
 title, author, key and text size. The preview is capped at 420 wide and
 floored at 360, and `previewWidth` derives that from `c.Size()`. `editorPreview`
 draws the slide through the same `slideBody` and `metricsFor` as `liveView`, so
-what the editor shows is what the stage shows at that size.
+what the editor shows is what the stage shows at that size. The **Part** and
+**Song details** headings carry a `Hide` / `Show` hint and fold their controls
+away; the choice lasts for the window, not for `library.json`.
 
 Every metadata field, label, text area and the slider updates the `songs`
 model and calls `songEdited`/`setTextSize`, which clamp the size, save the

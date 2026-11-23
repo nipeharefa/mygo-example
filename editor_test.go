@@ -126,6 +126,46 @@ func TestEditorSlideListSelectsSlide(t *testing.T) {
 	}
 }
 
+func TestEditorPartSectionFolds(t *testing.T) {
+	a := editorApp(t)
+	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
+	if err := tt.Click("Part"); err != nil {
+		t.Fatal(err)
+	}
+	if a.editorShowPart {
+		t.Fatal("clicking Part did not fold the section")
+	}
+	if tt.HasText("Add part to run of show") {
+		t.Error("the folded Part section still shows its controls")
+	}
+	if err := tt.Click("Part"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.editorShowPart {
+		t.Fatal("clicking Part again did not unfold the section")
+	}
+}
+
+func TestEditorDetailsSectionFolds(t *testing.T) {
+	a := editorApp(t)
+	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
+	if err := tt.Click("Song details"); err != nil {
+		t.Fatal(err)
+	}
+	if a.editorShowDetails {
+		t.Fatal("clicking Song details did not fold the section")
+	}
+	if tt.HasText("Text size") {
+		t.Error("the folded Song details section still shows its controls")
+	}
+	if err := tt.Click("Song details"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.editorShowDetails {
+		t.Fatal("clicking Song details again did not unfold the section")
+	}
+}
+
 func TestEditorPreviewWidthClamped(t *testing.T) {
 	a := newApp()
 	a.selectSong(0)

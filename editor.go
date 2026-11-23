@@ -242,17 +242,22 @@ func (a *app) editorInspector(c *ui.Context) {
 				}
 				if a.editPart >= 0 && a.editPart < len(a.songs[i].Parts) {
 					ui.Column(c).Gap(8).Children(func() {
-						editorSection(c, "Part")
-						editorLabel(c, "Part label")
-						ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-							ui.TextInput(c, &a.songs[i].Parts[a.editPart].Label).Label("Part label input").Grow(1).OnChange(a.songEdited)
-							ui.Button(c, "Remove part").OnClick(a.removePart)
-						})
-						ui.Button(c, "Add part to run of show").OnClick(a.addEditorPartToDeck)
+						a.editorToggle(c, "Part", &a.editorShowPart)
+						if a.editorShowPart {
+							editorLabel(c, "Part label")
+							ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+								ui.TextInput(c, &a.songs[i].Parts[a.editPart].Label).Label("Part label input").Grow(1).OnChange(a.songEdited)
+								ui.Button(c, "Remove part").OnClick(a.removePart)
+							})
+							ui.Button(c, "Add part to run of show").OnClick(a.addEditorPartToDeck)
+						}
 					})
 				}
 				ui.Column(c).Gap(10).Children(func() {
-					editorSection(c, "Song details")
+					a.editorToggle(c, "Song details", &a.editorShowDetails)
+					if !a.editorShowDetails {
+						return
+					}
 					ui.Row(c).Gap(10).Children(func() {
 						ui.Column(c).Gap(4).Grow(1).Children(func() {
 							editorLabel(c, "Title")
@@ -290,6 +295,23 @@ func (a *app) editorInspector(c *ui.Context) {
 // editorSection is a visible group heading inside a column.
 func editorSection(c *ui.Context, label string) {
 	ui.Text(c, label).FontSize(12).FontWeight(600).SingleLine()
+}
+
+// editorToggle folds a section's controls away, so the inspector can show
+// the preview and the slide text without the other fields.
+func (a *app) editorToggle(c *ui.Context, label string, open *bool) {
+	hint := "Show"
+	if *open {
+		hint = "Hide"
+	}
+	ui.Row(c).Gap(8).AlignItems(ui.Center).Label(label).TabStop(true).OnClick(func() {
+		*open = !*open
+		a.changed()
+	}).Children(func() {
+		ui.Text(c, label).FontSize(12).FontWeight(600).SingleLine()
+		ui.Spacer(c)
+		ui.Text(c, hint).FontSize(10).TextColor(c.Theme().TextMuted).SingleLine()
+	})
 }
 
 // editorLabel names the control under it instead of relying on a placeholder

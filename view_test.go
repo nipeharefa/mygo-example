@@ -184,6 +184,21 @@ func TestAddSongFromLibrary(t *testing.T) {
 	}
 }
 
+// A song slide's second line names its part before the lyric.
+func TestDeckRowShowsPartAsSubline(t *testing.T) {
+	a, tt := signedInApp(t)
+	a.deck, a.preview, a.stage = nil, 0, 0
+	tt.Frame()
+	if err := tt.Click("Add Amazing Grace"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	want := a.deck[0].Section + " · " + a.deck[0].firstLine()
+	if !tt.HasText(want) {
+		t.Fatalf("the run of show is missing %q: %q", want, tt.Texts())
+	}
+}
+
 // The Bible tab swaps in verse packs and adds one verse slide.
 func TestBibleTabAddsVerse(t *testing.T) {
 	a, tt := signedInApp(t)

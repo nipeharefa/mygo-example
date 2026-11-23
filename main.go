@@ -64,16 +64,18 @@ type app struct {
 	newWindow  func(mygo.WindowOptions) *mygo.Window
 	mainScreen func() []mygo.Display
 
-	help         *mygo.Window
-	editor       *mygo.Window
-	openEditor   bool // the frame asked for the editor window
-	editSong     int  // selection in a.songs
-	editPart     int
-	editSlide    int
-	editorStatus string
-	editQuery    string
-	settingsDir  string // app data dir; empty keeps tests headless
-	version      string // mygo.App.Version(); empty under go run
+	help              *mygo.Window
+	editor            *mygo.Window
+	openEditor        bool // the frame asked for the editor window
+	editSong          int  // selection in a.songs
+	editPart          int
+	editSlide         int
+	editorStatus      string
+	editQuery         string
+	editorShowPart    bool   // the Part fields are folded open
+	editorShowDetails bool   // the Song details fields are folded open
+	settingsDir       string // app data dir; empty keeps tests headless
+	version           string // mygo.App.Version(); empty under go run
 
 	// Updates, as the Help menu offers them: the context a check runs under
 	// (so quitting cancels it), whether this build can replace itself, and
@@ -129,6 +131,7 @@ func newApp() *app {
 	}
 	a.songs = cloneSongs(builtinSongs)
 	a.editSong, a.editPart, a.editSlide = -1, -1, -1
+	a.editorShowPart, a.editorShowDetails = true, true
 	a.addSong("amazing-grace")
 	a.addVerse("Psalm 23:1")
 	a.preview, a.stage = 0, 0

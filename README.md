@@ -82,7 +82,8 @@ the project's key, so an app accepts only updates it can verify.
 
 **Song editor** in the console header opens a separate window for the song
 library. Pick a song in the left list, a slide in the middle list, and edit it
-in the inspector on the right. A song has an author, a key, a text size, and
+in the inspector on the right; **Part** and **Song details** fold away with
+their **Show** / **Hide** control. A song has an author, a key, a text size, and
 one or more **parts** (a verse, a chorus, a bridge); each part holds one or
 more **slides**, and a slide is the text that fills one stage frame. **Add
 song** puts every part in the run of show in order; a part's **Add part to

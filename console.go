@@ -328,13 +328,23 @@ func (a *app) deckRow(c *ui.Context, i int) {
 		OnClick(func() { a.selectSlide(i) }).Children(func() {
 		ui.Text(c, fmt.Sprint(i+1)).FontSize(10).TextColor(t.TextMuted).Width(18).SingleLine()
 		ui.Column(c).Gap(2).Grow(1).Children(func() {
-			ui.Text(c, s.caption()).FontSize(12).FontWeight(600).SingleLine()
-			ui.Text(c, s.firstLine()).FontSize(10).TextColor(t.TextMuted).SingleLine()
+			ui.Text(c, s.Title).FontSize(12).FontWeight(600).SingleLine()
+			ui.Text(c, deckSubline(s)).FontSize(10).TextColor(t.TextMuted).SingleLine()
 		})
 		if i == a.stage {
 			ui.Badge(c, "LIVE")
 		}
 	})
+}
+
+// deckSubline names the part above the first line of a song slide, so the
+// run of show reads as title first and part second.
+func deckSubline(s slide) string {
+	line := s.firstLine()
+	if s.Kind == slideSong && s.Section != "" {
+		return s.Section + " · " + line
+	}
+	return line
 }
 
 // stagePanel has two cards: the stage, what the room and NDI see, and the
