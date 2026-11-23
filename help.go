@@ -14,7 +14,7 @@ func (a *app) openHelp() {
 		return
 	}
 	w := mygo.NewWindow(mygo.WindowOptions{
-		Title:     appTitle + " — Help",
+		Title:     appTitle + " · Help",
 		Width:     640,
 		Height:    620,
 		MinWidth:  520,

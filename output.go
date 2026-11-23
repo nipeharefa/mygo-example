@@ -45,7 +45,7 @@ func (a *app) liveView(c *ui.Context) {
 				ui.Text(c, "Nothing on stage").FontSize(24).TextColor(t.TextMuted)
 				return
 			}
-			slideBody(c, s, m)
+			slideBody(c, s, m, t)
 		})
 	}
 
@@ -86,7 +86,7 @@ func (a *app) openOutput() {
 		// traffic lights or resize edges. The feed does not need it; it
 		// is the operator's view of the room.
 		live = a.newWindow(mygo.WindowOptions{
-			Title:           appTitle + " — Live",
+			Title:           appTitle + " · Live",
 			Width:           1280,
 			Height:          720,
 			MinWidth:        640,

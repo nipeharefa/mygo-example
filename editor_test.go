@@ -111,11 +111,30 @@ func TestEditorPreviewWidthClamped(t *testing.T) {
 	a.selectSong(0)
 	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
 	tt.Frame()
-	if got := previewWidth(editorWidth); got != editorPreviewMax {
-		t.Errorf("preview at %d = %v, want %v", editorWidth, got, editorPreviewMax)
+	if got := previewWidth(editorWidth); got < editorPreviewMin || got > editorPreviewMax {
+		t.Errorf("preview at %d = %v, want %d..%d", editorWidth, got, editorPreviewMin, editorPreviewMax)
 	}
-	if got := previewWidth(900); got < 320 {
-		t.Errorf("preview at 900 = %v, want at least 320", got)
+	if got := previewWidth(editorMinWidth); got != editorPreviewMin {
+		t.Errorf("preview at minimum width = %v, want the floor %v", got, editorPreviewMin)
+	}
+	if got := previewWidth(2000); got != editorPreviewMax {
+		t.Errorf("preview at 2000 = %v, want the cap %v", got, editorPreviewMax)
+	}
+}
+
+func TestEditorPreviewKeepsTheConsoleTheme(t *testing.T) {
+	a := newApp()
+	a.selectSong(0)
+	leaked := false
+	tt := ui.NewTester(func(c *ui.Context) {
+		a.editorView(c)
+		if got, want := c.Theme().Background, consoleTheme(c).Background; got != want {
+			leaked = true
+		}
+	}, editorWidth, editorHeight)
+	tt.Frame()
+	if leaked {
+		t.Fatal("editorView changed the window theme; the preview must pass stage colors explicitly")
 	}
 }
 
@@ -173,7 +192,7 @@ func TestEditingTitleSavesLibrary(t *testing.T) {
 func TestEditingSlideTextSavesLibrary(t *testing.T) {
 	a := editorApp(t)
 	tt := ui.NewTester(a.editorView, editorWidth, 1600)
-	tt.Click("Slide text")
+	tt.Click("Slide text input")
 	tt.Type("new line")
 	want := a.songs[0].Parts[0].Slides[0]
 	if !strings.Contains(want, "new line") {
