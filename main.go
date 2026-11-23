@@ -47,6 +47,8 @@ type app struct {
 	verseQuery string
 	pack       string
 
+	songs []song // the active library: library.json once loaded
+
 	deck     []slide
 	preview  int // the row selected in the monitor
 	stage    int // the row on air
@@ -118,6 +120,7 @@ func newApp() *app {
 		},
 		updateRun: func() { mygo.App.Relaunch() },
 	}
+	a.songs = cloneSongs(builtinSongs)
 	a.addSong("amazing-grace")
 	a.addVerse("Psalm 23:1")
 	a.preview, a.stage = 0, 0
@@ -312,6 +315,7 @@ func main() {
 			log.Printf("mygo-demo: no app data directory: %v", err)
 		}
 		a.loadSettings()
+		a.loadLibrary()
 		if os.Getenv("MYGO_NDI") != "" {
 			// Session-only override: publish without rewriting the preference.
 			a.ndiOn = true
