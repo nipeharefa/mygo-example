@@ -21,15 +21,16 @@ changes, and then opens the console window with `mygo.NewWindow`:
 
 `mygo.App.OnQuit(a.stopNDI)` makes quitting the app unregister any NDI
 source, and `mygo.App.Run()` runs the main loop. There is no second
-process and no HTTP server; the only file is `settings.json` in the app
-data directory.
+process and no HTTP server; the files are `settings.json` and
+`library.json` in the app data directory.
 
 The console's view sets the console theme, draws the login card while
 `!a.signedIn`, and otherwise registers the console shortcuts and draws the
 shell. The stage is a separate `mygo.Window` created later by
-`openOutput`, with its own `ui.View(a.liveView)`; Settings is a page of the
-console and Help is a third window, created by `openHelp`. Every window's
-view is a pure builder, and `changed()` invalidates all of them.
+`openOutput`, with its own `ui.View(a.liveView)`; the Song editor is another
+window, created by `openEditorWindow`; Settings is a page of the console and
+Help is a further window, created by `openHelp`. Every window's view is a
+pure builder, and `changed()` invalidates all of them.
 
 ## State
 
@@ -44,7 +45,11 @@ element or a context:
 | `deck []slide`, `preview int`, `stage int` | the run of show, the row selected in the monitor, and the row on air |
 | `blackout bool` | the stage shows a black frame, deck unchanged |
 | `nextID int`, `deckList ui.ListState` | slide id counter and the list's persistent state |
-| `win`, `live`, `help *mygo.Window` | the console, stage and Help windows; Settings is a page of the console |
+| `win`, `live`, `editor`, `help *mygo.Window` | the console, stage, Song editor and Help windows; Settings is a page of the console |
+| `songs []song` | the song library, loaded from `library.json` or seeded from `builtinSongs` |
+| `openEditor bool` | the current frame asked to open the Song editor after it is built |
+| `editSong`, `editPart`, `editSlide int` | what the Song editor has selected; −1 means nothing is selected |
+| `editQuery`, `editorStatus string` | the editor's song filter and its last save/add note |
 | `displays []mygo.Display`, `stageDisplay int64` | the display list and the chosen stage display (0 = a window) |
 | `stageDisplayUsed int64` | the display the open stage was actually placed on |
 | `page int` | `pageConsole` or `pageSettings` |
@@ -58,11 +63,14 @@ element or a context:
 | `updatable bool` | whether this build can replace itself (`mygo.Updater.Enabled()` once ready) |
 | `updateChk`, `updateAsk`, `updateDl`, `updateRun` | seams over `mygo.Updater.Check`, `mygo.Dialog.Message`, the download, and `mygo.App.Relaunch` |
 
-`newApp()` picks the first pack and seeds the deck with Amazing Grace and
-Psalm 23:1, so a fresh run has something to show. `slide` carries an ID
-(`s1`, `s2`, …), a title, a section label, the text, and a kind
-(`slideSong` or `slideVerse`); `caption`, `eyebrow` and `firstLine` derive
-the strings the views need.
+`newApp()` picks the first pack, clones `builtinSongs` into `songs`, and
+seeds the deck with Amazing Grace and Psalm 23:1, so a fresh run has
+something to show. `slide` carries an ID (`s1`, `s2`, …), a title, a section
+label, the text, a text size and a kind (`slideSong` or `slideVerse`);
+`caption`, `eyebrow` and `firstLine` derive the strings the views need. A
+song is `{ID, Title, Author, Key, TextSize, Parts []songPart}`, and a part
+is `{Label, Slides []string}`: the label becomes the slide's section, and
+each slide string is one stage frame.
 
 Every mutation goes through a method on `app` (`addSong`, `addVerse`,
 `selectSlide`, `nextSlide`, `prevSlide`, `takeSlide`, `nextStage`,
@@ -215,6 +223,35 @@ frame and `tickStats` re-arms a one-second `time.AfterFunc` that
 invalidates the console — a main-thread timer, never a goroutine touching
 the view.
 
+### Song editor
+
+**Song editor** in the console header asks for a separate window:
+`requestEditor` sets `a.openEditor`, `settle()` clears the flag in the next
+pass and calls `openEditorWindow`, which reuses an open window or creates
+one with `a.newWindow` — Title `mygo-demo — Song editor`, 1200×800, minimum
+980×660, `StateKey: "editor"`, `Content: ui.View(a.editorView)`, and an
+`OnClosed` guard of `if a.editor != w { return }`. `closeEditor` nils the
+pointer before `Close()`, so a stale close cannot drop a new window.
+
+The left column (260 wide) holds the search box, `New song`,
+`Restore samples` and one `Edit <title>` row per song. The right column
+scrolls: a title row, the metadata fields, the text-size slider, a 16:9
+preview in the stage theme, the parts and their slides, and a `TextArea` for
+the selected slide. The preview is capped at 720 wide and floored at 320,
+and `previewWidth` derives that from `c.Size()`. `editorPreview` draws the
+slide through the same `slideBody` and `metricsFor` as `liveView`, so what
+the editor shows is what the stage shows at that size.
+
+Every metadata field, label, text area and the slider updates the `songs`
+model and calls `songEdited`/`setTextSize`, which clamp the size, save the
+whole `library.json` and set `editorStatus` immediately; there is no Save
+button. `addEditorSongToDeck` adds every part through `addSongParts`, and
+`addEditorPartToDeck` adds only the selected part through `addPartSlides`;
+both leave the stage row alone and put the monitor on the first added slide.
+Removing the last part or the last slide is refused with a status note. The
+editor does not persist the run of show: a slide copies its text and text
+size when added, so later edits do not rewrite what is already on the list.
+
 ### Updates
 
 **Check for Updates** is a button on the console, and the same button on the
@@ -320,19 +357,28 @@ Literal hex values live only in `theme.go`; every other view reads
 
 ## Data model
 
-`data.go` is the whole library:
+`data.go` holds the built-in library and its seed data:
 
-- 5 traditional, public-domain hymns with 10 sections in total (Amazing
-  Grace, Holy, Holy, Holy, Be Thou My Vision, All Creatures of Our God and
-  King, A Mighty Fortress Is Our God). Each has `ID`, `Title`, `Author`,
-  `Key` and `[]songSection{Label, Text}`; the text carries one line per
-  newline so a slide renders as written.
-- 4 verse packs (Assurance, Comfort, Praise, Sending) with 4 King James Version verses each (16 total), looked up by `ref` (`verseByRef`) or `song` id (`songByID`).
+- 5 traditional, public-domain hymns (Amazing Grace, Holy, Holy, Holy, Be
+  Thou My Vision, All Creatures of Our God and King, A Mighty Fortress Is
+  Our God) as `builtinSongs`. Each is a `song{ID, Title, Author, Key,
+  TextSize, Parts []songPart}`, and each part is `{Label, Slides []string}`:
+  All Creatures' verse is split into two slides, and the rest carry one.
+- 4 verse packs (Assurance, Comfort, Praise, Sending) with 4 King James
+  Version verses each (16 total), looked up by `ref` through `verseByRef`.
+
+The song library is `a.songs`, not the package variable: on first launch
+`loadLibrary` writes `builtinSongs` to `library.json`, and afterwards that
+file is the library. `findSong`/`(a *app) songByID` look songs up there;
+`normalizeLibrary` drops empty or duplicate ids and guarantees every song
+has at least one part with at least one slide, so the editor always has
+something to select. `cloneSongs` deep-copies the nested slices, because a
+deck slide must not alias the library text.
 
 The text is deliberately limited: public-domain hymns and the KJV (1611).
 Do not add copyrighted lyrics or a modern translation. Verses are unique
-by reference, and every song has at least one section; `deck_test.go`
-asserts both.
+by reference, song ids are unique in the library, and every song has at
+least one part; `data_test.go` and `deck_test.go` assert these.
 
 ## Rendering details worth knowing
 
@@ -344,9 +390,11 @@ asserts both.
   boxes also call `.Label(...)`; that label is what the tests click.
 - Buttons that act on a row carry a per-row accessible label (`Add
   Amazing Grace`, `Add Psalm 23:1`) while their visible text stays short.
-- The console's two stage cards and the stage window share `stageTheme`;
-  only the size and padding differ. A row on air carries a `LIVE` badge, so
-  the run of show shows what the room sees without a second look.
+- The console's two stage cards skip `slideBody` and draw a stylized
+  thumbnail; the stage window, the NDI feed and the editor preview all go
+  through `slideBody` with `metricsFor`, so those three agree. A row on air
+  carries a `LIVE` badge, so the run of show shows what the room sees
+  without a second look.
 - Disabled, not hidden, is the pattern for transport that cannot act
   (empty deck, first/last slide), so the layout does not jump.
 
@@ -362,13 +410,28 @@ tests must not press **Open output**).
   stage (click, Go Live, Enter, Cmd+Enter), arrow shortcuts (and that
   arrows in a text field do not move the deck), the blackout button, and
   the two empty states.
+- `data_test.go` — every built-in song has parts and slides, All Creatures'
+  verse keeps its two slides, a missing or out-of-range text size clamps to
+  40/24–72, `slideCount`, and `findSong`.
 - `deck_test.go` — data reachability (every song/verse resolves), unique
-  slide ids, section expansion, unknown ids, monitor clamping, take, stage
-  next/prev, removal from and above the stage, reorder without changing
-  what is on air (single rows, multi-row drags, and `to` as a gap),
-  `Move up`/`Move down` going through the same reorder, blackout,
+  slide ids, part expansion (including blank-slide skipping and the text
+  size snapshot), single-part adds, unknown ids, monitor clamping, take,
+  stage next/prev, removal from and above the stage, reorder without
+  changing what is on air (single rows, multi-row drags, and `to` as a
+  gap), `Move up`/`Move down` going through the same reorder, blackout,
   `stageSlide`/`previewSlide`/`upcomingSlide`, and `changed()` with no
   windows attached.
+- `library_test.go` — library round-trip, version and duplicate rejection,
+  seeding on first launch, corrupt files left untouched, an empty song list,
+  the empty `settingsDir` no-op, normalization, deep clones, and unique new
+  song ids.
+- `slideview_test.go` — `stageScale` and the metrics at full and half width.
+- `editor_test.go` — the editor window lifecycle (request, settle, close,
+  sign-out, `changed()` nil-safety), the console button, empty and filtered
+  lists, selection and preview, preview width clamping, metadata and slide
+  text editing that saves, part and slide add/remove with the last-one
+  guard, text size clamping, new/remove/restore songs, and adding a song or
+  one part to the run of show without touching the stage.
 - `settings_test.go` — the settings round-trip, missing and corrupt files,
   the empty `settingsDir` no-op, the legacy `outputDisplay` key, dropping a
   display that went away, `stageDisplayFound`, the Settings page with and
@@ -392,10 +455,14 @@ tests must not press **Open output**).
 
 ## Adding a song or a verse
 
-For a song, add an entry to `songs` in `data.go` with a unique `ID`, a
-title, an author, a key, and at least one section. Nothing else is needed:
-the library lists it, the search filters it, and `addSong` expands its
-sections.
+For a song, use **Song editor** in the app: `New song`, fill the title,
+author and key, add parts and slides, and set the text size. It saves to
+`library.json` and the console lists it on the next pass. A built-in seed
+goes in `builtinSongs` in `data.go` with a unique `ID`, a title, an author,
+a key, at least one part with one slide, and `TextSize: 0` for the default;
+`Restore samples` copies a missing built-in into an existing library. A
+song the operator edits in the app stays in `library.json` and is not
+overwritten.
 
 For a verse, add it to one of the packs' `Verses` with a unique `Ref` and
 its KJV text. The Bible tab lists it under that pack and `addVerse(ref)`
@@ -417,19 +484,25 @@ CGO_ENABLED=0 go test ./...
 
 Then `go run .` for the manual check: sign in, add/remove/move slides, use
 the arrows, black out, open the output (fullscreen with a second display),
-change slides, leave fullscreen with Esc, and with `MYGO_NDI=1` check that
-the NDI source follows the stage with the stage window closed too, and that
-sign-out stops it. On a sandboxed
+change slides, leave fullscreen with Esc, open the **Song editor**, edit a
+part's slide and the text size and check the preview and the stage agree,
+add one part to the run of show, restart to confirm `library.json` kept the
+edit, and with `MYGO_NDI=1` check that the NDI source follows the stage with
+the stage window closed too, and that sign-out stops it. On a sandboxed
 agent session, prefix Go commands with `GOCACHE="$TMPDIR/gocache-mygo-demo"`.
 
 ## Known drift and gaps
 
 - **The stage is one window.** There is no separate preview output and no
   per-display preview; the monitor lives in the console.
-- **Only the display and NDI preferences persist.** They live in
-  `settings.json` under the app data directory; the deck, the search boxes
-  and the selected pack live only in the process, so closing the app starts
-  over from the seed set.
+- **The library persists; the run of show does not.** `library.json` holds
+  every song's parts, slides and text size, and `settings.json` holds the
+  display and NDI preferences. The deck, the search boxes and the selected
+  pack live only in the process, so closing the app starts over from the
+  seed set.
+- **A song has no arrangement list.** The run of show is the arrangement:
+  adding a part again is how a chorus repeats. There is no per-song order
+  or repeat count.
 - **No undo/redo and no presentation media.** Slides are text; there are no
   images, videos or lower thirds.
 - **The sign-in is not security.** Two constants in `main.go`, no session,

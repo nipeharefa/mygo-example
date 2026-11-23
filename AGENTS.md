@@ -6,17 +6,18 @@ verses, previews the next slide on a monitor and sends one slide to a
 separate stage window, and can publish that stage as an NDI source on
 macOS, Windows and Linux. The NDI feed draws the slide itself, so publishing
 needs no window on screen and one monitor is enough. The Go side is the whole app: package `main`
-builds the console plus on-demand stage, Settings and Help windows with
-`github.com/egoist/mygo/ui`, and there is no network access, no database,
-and no web page in use.
+builds the console plus on-demand stage, Song editor, Settings and Help
+windows with `github.com/egoist/mygo/ui`, and there is no network access,
+no database, and no web page in use.
 
 The sign-in is a demo gate, not security: the account is the
 `demoUsername`/`demoPassword` pair in `main.go`, `signedIn` lives on
 `app`, and nothing lasts beyond the process except the display and NDI
-preferences, which are a small JSON file in the app data directory.
+preferences in `settings.json` and the song library in `library.json`, two
+small JSON files in the app data directory.
 
 **Read [docs/architecture.md](docs/architecture.md) before changing the
-view.** It describes the state model, the two windows, the frame contract,
+view.** It describes the state model, every window, the frame contract,
 the widget choices, and the testing approach. The MyGo lifetime and
 identity rules live in
 [.agents/skills/mygo-maintenance/SKILL.md](.agents/skills/mygo-maintenance/SKILL.md).
@@ -34,7 +35,7 @@ identity rules live in
   reads `c.Theme()`, so light and dark appearance and the system accent and
   text-scale preferences keep working.
 - **Mutate state from callbacks, then redraw every window.** Every state
-  method ends with `a.changed()`, which invalidates `a.win`, `a.live`,
+  method ends with `a.changed()`, which invalidates `a.win`, `a.live`, `a.editor`,
   `a.settings` and `a.help` (each nil-safe). Call it from
   `OnClick`/`OnSubmit`/`OnChange`/shortcut/menu callbacks, never from
   inside the build pass.
@@ -71,9 +72,10 @@ identity rules live in
 - **Keep the song and scripture text public domain.** `data.go` holds the
   5 traditional hymns and the 4 KJV verse packs; the KJV (1611) and those
   hymn texts are public domain. Do not paste in copyrighted lyrics or a
-  modern Bible translation. Each song needs at least one section, and every
-  verse reference must be unique, because the deck and the library look
-  verses up by reference (`deck_test.go` checks both).
+  modern Bible translation. Each song needs at least one part with one
+  slide, and every verse reference and song id must be unique, because the
+  deck and the library look them up by reference (`data_test.go` and
+  `deck_test.go` check these).
 - **Verify against the pinned API, not memory.** Resolve the source with
   `go list -m -f '{{.Dir}}' github.com/egoist/mygo`, then read `ui/doc.go`
   and the widget you are using. The app pins v0.10.0 in `go.mod`;
@@ -87,12 +89,13 @@ identity rules live in
   closes the output and stops NDI.
 - **Windows are created outside the event that asks for them, and tests
   never open one.** `mygo.NewWindow` is called only through `a.newWindow`,
-  from `openOutput` and `openHelp` after `WhenReady`, never from the build
-  pass and never from a test, because a headless `ui.Tester` has no
-  application. The console asks for the stage with `requestStage`;
-  `settle()` turns that into `a.openStage`, and `view` asks for a later
-  pass (`c.After(openStageDelay)`), so `openOutput` runs in a frame that no
-  event is waiting on. That is what keeps Open output from hanging: creating
+  from `openOutput`, `openEditorWindow` and `openHelp` after `WhenReady`,
+  never from the build pass and never from a test, because a headless
+  `ui.Tester` has no application. The console asks for the stage with
+  `requestStage` and for the Song editor with `requestEditor`; `settle()`
+  turns those into `a.openStage`/`a.openEditor`, and `view` asks for a
+  later pass (`c.After(openStageDelay)`), so the window is created in a
+  frame that no event is waiting on. That is what keeps Open output from hanging: creating
   and showing a window inside the click, and then placing it with
   `SetPosition`/`SetFullScreen`, waited on a window that was not on screen
   yet. Never call a `mygo.Window` method from inside the build pass either;
@@ -106,12 +109,15 @@ identity rules live in
   closes and reopens it. Never reopen it from a display notification, and
   nil `a.live` before `Close()` — a `Close()` whose `OnClosed` guard has
   already been satisfied never destroys the window.
-- **Settings persistence is the only persistence.**
+- **Two files persist: the settings and the song library.**
   `settings.go` reads and writes `settings.json` (display ID, NDI on/off,
-  NDI frame size)
-  in `mygo.App.Path(mygo.PathUserData)`. `a.settingsDir` is empty until
-  `WhenReady` and in tests, and `saveSettings` then does nothing. The run
-  of show is session-only; do not persist it unasked.
+  NDI frame size) and `library.go` reads and writes `library.json` (the
+  songs, their parts, slides and text size) in
+  `mygo.App.Path(mygo.PathUserData)`. `a.settingsDir` is empty until
+  `WhenReady` and in tests, and `saveSettings`/`saveLibrary` then do
+  nothing. A first launch seeds `library.json` from `builtinSongs`; after
+  that the file is the library and the editor writes it on every change.
+  The run of show is session-only; do not persist it unasked.
 - **Do not edit `src/mygo.ts` by hand.** It is `mygo generate` output, and
   the web frontend is currently unused (see "Known state").
 - **NDI output stays pure Go, and the binding lives in one file.**
@@ -196,9 +202,12 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | Path | What |
 | --- | --- |
 | `main.go` | The app: `app` state and its `newWindow`/`mainScreen` seams, the demo account, sign-in/out, `changed`, `requestStage`/`settle`, `tickStats`, `setNDI`/`toggleNDI`/`ndiLabel`, `main()` startup order (app data dir, saved preferences, menu, display subscription, console window, first display refresh, stats timer), and the `stageSourceName` constant. |
-| `data.go` | The library: 5 public-domain hymns (10 sections) and 4 KJV verse packs (16 verses), plus `songByID`/`verseByRef`. No data here is fetched or stored. |
-| `deck.go` | The run-of-show model: `slide`, `slideKind`, add/select/next/prev (monitor), `takeSlide`, `nextStage`/`prevStage`, remove/move/blackout, `reorderSlides` (the drag and Move up/down path, `to` is a gap), `stageSlide`/`previewSlide`/`upcomingSlide`, `clampSlides`. |
-| `console.go` | The console view: top bar, library (Songs/Bible tabs, search, pack picker), run of show list with the LIVE badge, the two-card stage/monitor panel with Go Live, and the login card. |
+| `data.go` | The seed library: `builtinSongs` (5 public-domain hymns as `song{... Parts []songPart}`), 4 KJV verse packs (16 verses), `findSong`, `verseByRef`, the text-size limits and `clampTextSize`. |
+| `deck.go` | The run-of-show model: `slide` (including its snapshotted `TextSize`), `slideKind`, add/select/next/prev (monitor), `addSongParts`/`addPartSlides`/`addPart`, `takeSlide`, `nextStage`/`prevStage`, remove/move/blackout, `reorderSlides` (the drag and Move up/down path, `to` is a gap), `stageSlide`/`previewSlide`/`upcomingSlide`, `clampSlides`. |
+| `library.go` | The song library: `library.json` read/write and versioning, `loadLibrary`/`saveLibrary`, first-launch seeding from `builtinSongs`, `normalizeLibrary`, `cloneSongs`, `newSongID`, and `(a *app) songByID`/`libraryPath`. |
+| `editor.go` | The Song editor window: `requestEditor`/`openEditorWindow`/`closeEditor`, the library list and search, the 16:9 preview, metadata/part/slide editing with immediate saves, text size, new/remove/restore songs, and adding a song or part to the run of show. |
+| `slideview.go` | The shared slide renderer: `stageDesignWidth`/`Height`, `stageScale`, `slideMetrics`/`metricsFor`, and `slideBody`, used by the stage window, the NDI feed and the editor preview. |
+| `console.go` | The console view: top bar (including **Song editor**), library (Songs/Bible tabs, search, pack picker), run of show list with the LIVE badge, the two-card stage/monitor panel with Go Live, and the login card. |
 | `output.go` | The stage window: `liveView`, stage shortcuts, `openOutput`/`closeOutput`/`togglePresent`, `placeStage`/`shutStage`. |
 | `theme.go` | The only file with literal colors: warm console theme (light/dark) and the forced-dark stage theme. |
 | `menu.go` | `buildMenu` (app, edit, Settings, Help menus; no Check for Updates, because the Help menu is macOS-only in MyGo) and `showAbout`. |
@@ -207,6 +216,10 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `update.go` | The Check for Updates button: `lookForUpdate` (the feed, with a timeout), `checkForUpdates`/`showCheck` (the offer), `installUpdate`, `sayUpdates`, and `newerVersion` for the comparison. |
 | `update_test.go` | The updater without a window or a feed: version order, the newest-version and error notes, the offer, install-and-restart, Not Now, a failed install, and the two builds that cannot update. |
 | `view_test.go` | Headless console tests: login gate, library, add/search, monitor vs stage (click, Go Live, Enter, Cmd+Enter), arrows, blackout, empty deck, sign out. |
+| `library_test.go` | The library file without a window: round-trip, version/duplicate rejection, seeding, corrupt files, empty lists, normalization, clones, new ids. |
+| `data_test.go` | The built-in seeds: parts and slides, the All Creatures split, text-size defaults/clamps, slide counts, `findSong`. |
+| `slideview_test.go` | The shared renderer's scale and metrics at full and half width. |
+| `editor_test.go` | The editor headless: window lifecycle, console button, list/search/selection/width, metadata/slide edits that save, part and slide guards, text size, new/remove/restore, add-to-show, and the deck staying a snapshot. |
 | `menu_test.go` | Headless menu structure: item IDs, accelerator, click handlers present (clicks not run). |
 | `settings_test.go` | Settings round-trip (display, NDI, frame size), missing/corrupt defaults, legacy `outputDisplay` migration, `stageDisplayFound`, the Settings page rendering, display refresh without reopening the stage. |
 | `deck_test.go` | Headless model tests: data reachability, ids, clamping, reorder, blackout, `changed()` without windows. |
@@ -223,20 +236,20 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `ndi_render_stub.go` | The same size functions for the builds without a sender, so `main.go` compiles everywhere. |
 | `automation_e2e.go` | The `e2e`-tagged import of the MyGo automation plugin, so a built app can be driven over `MYGO_AUTOMATION`; no release build has it. |
 | `ndi_source_test.go` | The rendered feed: BGRA order, the size cap, the whole slide at odd and large sizes, a blacked-out frame, following the stage, and Stop not waiting on a draw. |
-| `README.md` | What a downloader needs: installers, the demo account, running a service, shortcuts, and the per-platform NDI instructions (the runtime, not a window, is what NDI needs). |
+| `README.md` | What a downloader needs: installers, the demo account, running a service, the Song editor, shortcuts, and the per-platform NDI instructions (the runtime, not a window, is what NDI needs). |
 | `mygo.config.ts` | Packaging: name, identifier, version, output directory. `devUrl`, `devCommand`, `buildCommand` and `frontendDist` are inert for a native view. |
 | `src/`, `index.html`, `vite.config.ts` | Leftover web template; nothing renders it. |
 | `.github/workflows/ci.yml` | The test gate, a native Windows run that launches the binary, the macOS/Windows/Linux packaging matrix, and a release job on `v*` tags. |
 | `docs/architecture.md` | How the app works; read this next. |
-| `docs/superpowers/plans/` | Historical plans: the 0.2.0 worship presenter, the monitor/Settings beta, the stage/Settings fix in beta.4, and the rendered NDI feed in beta.5. |
+| `docs/superpowers/plans/` | Historical plans: the 0.2.0 worship presenter, the monitor/Settings beta, the stage/Settings fix in beta.4, the rendered NDI feed in beta.5, and the editable song library. |
 
 ## Known state, deliberately untouched
 
 The web scaffold (`src/`, `index.html`, `vite.config.ts`, the `devUrl` and
 frontend settings in `mygo.config.ts`) and the `tick` event in
 `src/mygo.ts` predate the native UI and are unused. `dist/` is still built
-and embedded, but no window loads it. The run of show is not persisted,
-there is no undo/redo, and no media beyond text; only the display and NDI
-preferences survive a restart. These are recorded in
+and embedded, but no window loads it. The run of show is not persisted
+and there is no undo/redo; only the display and NDI preferences and the
+song library survive a restart. These are recorded in
 `docs/architecture.md` under "Known drift and gaps"; do not clean them up
 unasked.

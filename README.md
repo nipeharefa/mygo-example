@@ -5,7 +5,8 @@ A simple worship presenter for a small church screen, built with
 domain hymns and King James verses, previews the next slide on a monitor
 while one slide goes to a separate stage window, and can publish that stage
 as an NDI video source for OBS or a projector feed — with no window on
-screen, so one monitor is enough. Everything stays on the machine: no
+screen, so one monitor is enough. A separate **Song editor** window edits
+the song library itself: parts, slides, text and text size. Everything stays on the machine: no
 account, no network, no database.
 
 Sign in with **admin** / **admin**. The sign-in is a demo gate, not
@@ -37,8 +38,8 @@ are looking at). Moving the monitor never changes the room until you press
 1. Sign in. A fresh session starts with Amazing Grace and Psalm 23:1 on
    the list.
 2. Add songs from **Songs** and verses from **Bible**. Adding a song puts
-   every section in the list; the search boxes and the pack picker narrow
-   the library, not the list.
+   every part's slides in the list, in order; the search boxes and the pack
+   picker narrow the library, not the list.
 3. Click a row, use **←** / **→**, or press **Next** / **Prev** to move the
    monitor. Press **Go Live**, **Enter** on the list, or **Cmd/Ctrl+Enter**
    to put that row on stage. The row on air carries a `LIVE` badge.
@@ -65,8 +66,9 @@ The stage opens once and stays open until you close it: changing anything
 that does not touch the display the stage is on leaves it alone. Closing it
 does not stop NDI, so a feed can keep running with no stage window at all.
 
-The display and NDI preferences are saved between runs; the run of show is
-not. A saved display that is no longer attached falls back to a window.
+The display and NDI preferences and the song library are saved between
+runs; the run of show is not. A saved display that is no longer attached
+falls back to a window.
 
 **Check for Updates** (a button on the console, and on the Help page) asks
 GitHub for the newest release and offers
@@ -75,6 +77,29 @@ for the installers from a release — a development build, or an install a
 package manager owns (such as the `.deb`), is updated another way. Every
 release on GitHub carries per-platform update archives that are signed with
 the project's key, so an app accepts only updates it can verify.
+
+## Editing songs
+
+**Song editor** in the console header opens a second window for the song
+library. A song has an author, a key, a text size, and one or more **parts**
+(a verse, a chorus, a bridge); each part holds one or more **slides**, and a
+slide is the text that fills one stage frame. **Add song** puts every part in
+the run of show in order; a part's **Add part to run of show** adds it again
+where the arrangement needs it, so a chorus can follow every verse without
+another copy of the song.
+
+Every edit saves to `library.json` in the app data directory, so a song
+written once survives a restart. A first launch seeds that file from the
+five built-in hymns. **Restore samples** brings back any built-in song whose
+id the library lost and never overwrites a song you edited. **New song**
+starts an empty draft, and **Remove song** drops the selected one.
+
+**Text size** is one number per song, in stage units at the 1280×720 design:
+40 is the built-in size and the slider spans 24 to 72. The editor's 16:9
+preview, the stage window and the NDI feed all scale from that number, so a
+smaller output shrinks the text with it instead of clipping it. A slide
+copies its size when it is added, so changing a song later does not rewrite
+slides already in the run of show.
 
 ## The live output as an NDI source
 
