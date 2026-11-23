@@ -17,11 +17,12 @@ const (
 )
 
 type slide struct {
-	ID      string
-	Title   string
-	Section string
-	Text    string
-	Kind    slideKind
+	ID       string
+	Title    string
+	Section  string
+	Text     string
+	Kind     slideKind
+	TextSize float64 // snapshot of the song's stage size when the slide was added
 }
 
 // caption names the slide under the stage preview.
@@ -50,8 +51,15 @@ func (s slide) firstLine() string {
 
 // newSlide stamps the next unique id on a slide. The id, not the position,
 // is the list's identity, so the same song can appear twice.
-func (a *app) newSlide(s slide) slide {
-	s.ID = fmt.Sprintf("s%d", a.nextID)
+func (a *app) newSlide(title, section, text string, kind slideKind, size float64) slide {
+	s := slide{
+		ID:       fmt.Sprintf("s%d", a.nextID),
+		Title:    title,
+		Section:  section,
+		Text:     text,
+		Kind:     kind,
+		TextSize: size,
+	}
 	a.nextID++
 	return s
 }
@@ -64,19 +72,54 @@ func (a *app) addSong(id string) {
 	if !ok {
 		return
 	}
+	if a.addSongParts(s) > 0 {
+		a.changed()
+	}
+}
+
+// addSongParts appends all of one song's slides and moves the monitor to the
+// first new one. It returns how many slides it added and leaves the preview
+// alone when the song has no text.
+func (a *app) addSongParts(s song) int {
 	first := len(a.deck)
+	n := 0
 	for _, part := range s.Parts {
-		for _, text := range part.Slides {
-			a.deck = append(a.deck, a.newSlide(slide{
-				Title:   s.Title,
-				Section: part.Label,
-				Text:    text,
-				Kind:    slideSong,
-			}))
+		n += a.addPartSlides(s, part)
+	}
+	if n > 0 {
+		a.preview = first
+	}
+	return n
+}
+
+// addPartSlides appends the non-blank slides of one part, stamped with the
+// song's size, and returns how many it added.
+func (a *app) addPartSlides(s song, part songPart) int {
+	n := 0
+	for _, text := range part.Slides {
+		if strings.TrimSpace(text) == "" {
+			continue
 		}
+		a.deck = append(a.deck, a.newSlide(s.Title, part.Label, text, slideSong, s.textSize()))
+		n++
+	}
+	return n
+}
+
+// addPart appends one named part of a song to the run of show, so a chorus
+// can come back without adding the whole song again.
+func (a *app) addPart(id string, part int) bool {
+	s, ok := songByID(id)
+	if !ok || part < 0 || part >= len(s.Parts) {
+		return false
+	}
+	first := len(a.deck)
+	if a.addPartSlides(s, s.Parts[part]) == 0 {
+		return false
 	}
 	a.preview = first
 	a.changed()
+	return true
 }
 
 // addVerse appends one scripture slide and moves the monitor to it.
@@ -85,12 +128,7 @@ func (a *app) addVerse(ref string) {
 	if !ok {
 		return
 	}
-	a.deck = append(a.deck, a.newSlide(slide{
-		Title:   v.Ref,
-		Section: "Scripture",
-		Text:    v.Text,
-		Kind:    slideVerse,
-	}))
+	a.deck = append(a.deck, a.newSlide(v.Ref, "Scripture", v.Text, slideVerse, defaultTextSize))
 	a.preview = len(a.deck) - 1
 	a.changed()
 }

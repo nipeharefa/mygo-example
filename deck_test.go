@@ -553,3 +553,111 @@ func TestMoveSlideUsesTheReorder(t *testing.T) {
 		t.Fatalf("preview = %d for %s, want the moved row", a.preview, second)
 	}
 }
+
+func TestAddSongSnapshotsTextSize(t *testing.T) {
+	a := &app{}
+	a.addSong("amazing-grace")
+	for i, s := range a.deck {
+		if s.TextSize != defaultTextSize {
+			t.Errorf("slide %d size = %v, want %v", i, s.TextSize, defaultTextSize)
+		}
+	}
+}
+
+func TestAddSongAllCreaturesHasTwoSlides(t *testing.T) {
+	a := &app{}
+	a.addSong("all-creatures")
+	if len(a.deck) != 2 {
+		t.Fatalf("deck = %d slides, want 2", len(a.deck))
+	}
+	for i, s := range a.deck {
+		if s.Section != "Verse 1" {
+			t.Errorf("slide %d section = %q, want Verse 1", i, s.Section)
+		}
+	}
+	if a.preview != 0 {
+		t.Errorf("preview = %d, want 0", a.preview)
+	}
+}
+
+func TestAddSongSkipsBlankSlides(t *testing.T) {
+	a := &app{}
+	draft := song{
+		Title: "Draft",
+		Parts: []songPart{{Label: "Verse 1", Slides: []string{"", "   ", "real text"}}},
+	}
+	if n := a.addSongParts(draft); n != 1 {
+		t.Fatalf("added = %d, want 1", n)
+	}
+	if len(a.deck) != 1 || a.deck[0].Text != "real text" {
+		t.Fatalf("deck = %+v", a.deck)
+	}
+	if a.preview != 0 {
+		t.Errorf("preview = %d, want 0", a.preview)
+	}
+}
+
+func TestAddSongWithNoTextLeavesDeckAndPreview(t *testing.T) {
+	a := &app{}
+	a.addSong("amazing-grace")
+	a.nextStage()
+	before := len(a.deck)
+	draft := song{Parts: []songPart{{Label: "Verse 1", Slides: []string{" ", ""}}}}
+	if n := a.addSongParts(draft); n != 0 {
+		t.Fatalf("added = %d, want 0", n)
+	}
+	if len(a.deck) != before || a.preview != 1 {
+		t.Errorf("deck = %d, preview = %d; want %d, 1", len(a.deck), a.preview, before)
+	}
+}
+
+func TestAddPartAppendsOnePart(t *testing.T) {
+	a := &app{}
+	a.addSong("amazing-grace")
+	a.nextStage()
+	onAir := a.deck[a.stage].ID
+
+	if !a.addPart("amazing-grace", 1) {
+		t.Fatal("addPart returned false")
+	}
+	if len(a.deck) != 4 {
+		t.Fatalf("deck = %d, want 4", len(a.deck))
+	}
+	if a.deck[3].Section != "Verse 2" {
+		t.Errorf("section = %q, want Verse 2", a.deck[3].Section)
+	}
+	if a.preview != 3 {
+		t.Errorf("preview = %d, want 3", a.preview)
+	}
+	if a.stage != 1 || a.deck[a.stage].ID != onAir {
+		t.Errorf("addPart moved the stage")
+	}
+}
+
+func TestAddPartIgnoresUnknown(t *testing.T) {
+	a := &app{}
+	if a.addPart("no-such-song", 0) {
+		t.Error("accepted an unknown song")
+	}
+	if a.addPart("amazing-grace", 9) {
+		t.Error("accepted an out-of-range part")
+	}
+	if a.addPart("amazing-grace", -1) {
+		t.Error("accepted a negative part")
+	}
+	if len(a.deck) != 0 {
+		t.Errorf("deck = %d, want 0", len(a.deck))
+	}
+}
+
+func TestAddPartSkipsBlankSlides(t *testing.T) {
+	a := &app{}
+	draft := song{Title: "Draft"}
+	part := songPart{Label: "Chorus", Slides: []string{"", "line"}}
+	if n := a.addPartSlides(draft, part); n != 1 {
+		t.Fatalf("added = %d, want 1", n)
+	}
+	if len(a.deck) != 1 || a.deck[0].Section != "Chorus" {
+		t.Fatalf("deck = %+v", a.deck)
+	}
+}
