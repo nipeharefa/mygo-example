@@ -22,6 +22,10 @@ type settings struct {
 	// NDIResolution is the size the feed publishes at: 0 is 720p, the
 	// default, and 1 is 1080p.
 	NDIResolution int `json:"ndiResolution"`
+	// UpdateChannel is 1 when Check for Updates offers beta releases as well
+	// as the newest stable one. 0 asks for stable only, which is the default:
+	// a missing key reads as 0.
+	UpdateChannel int `json:"updateChannel"`
 }
 
 // legacySettings is the file written before the display key was named
@@ -87,6 +91,7 @@ func (a *app) loadSettings() {
 	a.stageDisplay = s.Display
 	a.ndiOn = s.NDI
 	a.ndiResolution = s.NDIResolution
+	a.updateChannel = s.UpdateChannel == updateChannelBeta
 	// Only drop the saved display when the list is known: startup fills it
 	// before loading, while a headless test may leave it empty.
 	if len(a.displays) > 0 && a.stageDisplay != 0 && !a.hasDisplay(a.stageDisplay) {
@@ -101,7 +106,12 @@ func (a *app) saveSettings() {
 	if path == "" {
 		return
 	}
-	err := writeSettings(path, settings{Display: a.stageDisplay, NDI: a.ndiOn, NDIResolution: a.ndiResolution})
+	err := writeSettings(path, settings{
+		Display:       a.stageDisplay,
+		NDI:           a.ndiOn,
+		NDIResolution: a.ndiResolution,
+		UpdateChannel: updateChannelOf(a.updateChannel),
+	})
 	if err != nil {
 		log.Printf("mygo-demo: save settings: %v", err)
 	}

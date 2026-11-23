@@ -72,10 +72,14 @@ type app struct {
 	// cannot answer a dialog.
 	ctx       context.Context
 	updatable bool
-	updateChk func(ctx context.Context) (*mygo.Update, error)
-	updateAsk func(mygo.MessageOptions) (mygo.MessageResult, error)
-	updateDl  func(ctx context.Context, up *mygo.Update, progress func(downloaded, total int64)) error
-	updateRun func()
+	// updateChannel follows the saved preference: false offers stable releases
+	// only, true offers the newest beta too.
+	updateChannel bool
+	setBeta       func(on bool) // the seam for mygo.Updater.SetPrereleases
+	updateChk     func(ctx context.Context) (*mygo.Update, error)
+	updateAsk     func(mygo.MessageOptions) (mygo.MessageResult, error)
+	updateDl      func(ctx context.Context, up *mygo.Update, progress func(downloaded, total int64)) error
+	updateRun     func()
 
 	// The stage: where it opens, where the open window went, and whether
 	// NDI publishes it.
@@ -106,6 +110,7 @@ func newApp() *app {
 		pack:       packs[0].Name,
 		newWindow:  mygo.NewWindow,
 		mainScreen: mygo.Screen.Displays,
+		setBeta:    mygo.Updater.SetPrereleases,
 		updateChk:  mygo.Updater.Check,
 		updateAsk:  mygo.Dialog.Message,
 		updateDl: func(ctx context.Context, up *mygo.Update, progress func(downloaded, total int64)) error {
@@ -313,6 +318,9 @@ func main() {
 		}
 		a.version = mygo.App.Version()
 		a.updatable = mygo.Updater.Enabled() || updatableOverride
+		if a.setBeta != nil {
+			a.setBeta(a.updateChannel)
+		}
 		mygo.App.SetMenu(buildMenu(a))
 		mygo.Screen.OnDisplaysChanged(a.displaysChanged)
 		a.win = a.newWindow(mygo.WindowOptions{
