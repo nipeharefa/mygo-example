@@ -80,7 +80,7 @@ func TestEditorSelectsSong(t *testing.T) {
 	a := newApp()
 	a.editSong, a.editPart, a.editSlide = -1, -1, -1
 	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
-	tt.Click("Edit Amazing Grace")
+	tt.Click("Amazing Grace")
 	if a.editSong != 0 {
 		t.Fatalf("editSong = %d, want 0", a.editSong)
 	}
@@ -106,16 +106,36 @@ func TestEditorPreviewShowsSlideParts(t *testing.T) {
 	}
 }
 
+func TestEditorPartListSelectsPart(t *testing.T) {
+	a := newApp()
+	a.selectSong(0)
+	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
+	tt.Click("Verse 2")
+	if a.editPart != 1 || a.editSlide != 0 {
+		t.Fatalf("selection = part %d slide %d, want part 1 slide 0", a.editPart, a.editSlide)
+	}
+}
+
+func TestEditorSlideListSelectsSlide(t *testing.T) {
+	a := newApp()
+	a.selectSong(0)
+	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
+	tt.Click("Verse 3 slide 1")
+	if a.editPart != 2 || a.editSlide != 0 {
+		t.Fatalf("selection = part %d slide %d, want part 2 slide 0", a.editPart, a.editSlide)
+	}
+}
+
 func TestEditorPreviewWidthClamped(t *testing.T) {
 	a := newApp()
 	a.selectSong(0)
 	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
 	tt.Frame()
-	if got := previewWidth(editorWidth); got < editorPreviewMin || got > editorPreviewMax {
-		t.Errorf("preview at %d = %v, want %d..%d", editorWidth, got, editorPreviewMin, editorPreviewMax)
+	if got := previewWidth(editorWidth); got != editorPreviewMax {
+		t.Errorf("preview at %d = %v, want the cap %v", editorWidth, got, editorPreviewMax)
 	}
-	if got := previewWidth(editorMinWidth); got != editorPreviewMin {
-		t.Errorf("preview at minimum width = %v, want the floor %v", got, editorPreviewMin)
+	if got := previewWidth(900); got != editorPreviewMin {
+		t.Errorf("preview at 900 = %v, want the floor %v", got, editorPreviewMin)
 	}
 	if got := previewWidth(2000); got != editorPreviewMax {
 		t.Errorf("preview at 2000 = %v, want the cap %v", got, editorPreviewMax)
@@ -144,7 +164,7 @@ func TestEditorSearchKeepsSelectionStable(t *testing.T) {
 	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
 	tt.Click("Search songs")
 	tt.Type("holy")
-	tt.Click("Edit Holy, Holy, Holy")
+	tt.Click("Holy, Holy, Holy")
 	if a.editSong != 1 {
 		t.Fatalf("editSong = %d, want the real index 1", a.editSong)
 	}

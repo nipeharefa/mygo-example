@@ -9,15 +9,16 @@ import (
 )
 
 const (
-	editorWidth      = 1280
-	editorHeight     = 820
-	editorMinWidth   = 1120
-	editorMinHeight  = 700
-	editorListWidth  = 240
-	editorPadding    = 20
-	editorGap        = 16
-	editorPreviewMax = 560
-	editorPreviewMin = 380
+	editorWidth       = 1280
+	editorHeight      = 820
+	editorMinWidth    = 1120
+	editorMinHeight   = 700
+	editorSongsWidth  = 220
+	editorSlidesWidth = 260
+	editorPadding     = 20
+	editorGap         = 16
+	editorPreviewMax  = 420
+	editorPreviewMin  = 360
 )
 
 // requestEditor asks for the editor window; the next frame opens it, so no
@@ -63,145 +64,230 @@ func (a *app) closeEditor() {
 	w.Close()
 }
 
-// editorView is the song editor: the library on the left, and the selected
-// song's preview and parts on the right. It is a pure function of a.songs and
-// the edit indices, like every other view.
+// editorView is the song editor: the song library, the selected song's slides,
+// and an inspector with the preview and the fields for what is selected. It is
+// a pure function of a.songs and the edit indices, like every other view.
 func (a *app) editorView(c *ui.Context) {
 	c.SetTheme(consoleTheme(c))
 	t := c.Theme()
-	ui.Column(c).Fill().Background(t.Background).Padding(editorPadding).Gap(14).Children(func() {
+	ui.Column(c).Fill().Background(t.Background).Padding(editorPadding).Gap(12).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "Song editor").FontSize(18).FontWeight(600).SingleLine()
 			ui.Spacer(c)
+			ui.Button(c, "Add song to run of show").OnClick(a.addEditorSongToDeck)
 			ui.Button(c, "Close").OnClick(a.closeEditor)
 		})
-		ui.Row(c).Fill().Grow(1).Gap(18).AlignItems(ui.Stretch).Children(func() {
-			a.editorList(c)
-			a.editorMain(c)
+		ui.Row(c).Fill().Grow(1).Gap(editorGap).AlignItems(ui.Stretch).Children(func() {
+			a.editorSongs(c)
+			a.editorSlides(c)
+			a.editorInspector(c)
 		})
 	})
 }
 
-// editorList is the searchable song library. A row keeps its real index, so a
-// filter can never remap the selection.
-func (a *app) editorList(c *ui.Context) {
+// editorSongs is the library: one row per song, the way the run of show and
+// the song books the operator knows are laid out.
+func (a *app) editorSongs(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c).Width(editorListWidth).Gap(8).Children(func() {
+	ui.Column(c).Width(editorSongsWidth).Gap(8).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "Songs").FontSize(12).FontWeight(600).TextColor(t.TextMuted).SingleLine()
+			editorSection(c, "Songs")
 			ui.Spacer(c)
-			ui.Button(c, "New song")
-			ui.Button(c, "Restore samples")
+			ui.Text(c, fmt.Sprint(len(a.songs))).FontSize(10).TextColor(t.TextMuted).SingleLine()
 		})
-		ui.SearchField(c, &a.editQuery).Label("Search songs").Placeholder("Search songs")
-		ui.Scroll(c).Fill().Grow(1).Children(func() {
-			if len(a.songs) == 0 {
-				ui.Text(c, "No songs yet").FontSize(11).TextColor(t.TextMuted).Padding(6)
-				return
-			}
-			query := strings.ToLower(strings.TrimSpace(a.editQuery))
-			shown := 0
-			for i, s := range a.songs {
-				if query != "" && !strings.Contains(strings.ToLower(s.Title), query) {
-					continue
+		ui.SearchField(c, &a.editQuery).Label("Search songs")
+		ui.Row(c).Gap(6).Children(func() {
+			ui.Button(c, "New song").OnClick(a.newSong)
+			ui.Button(c, "Restore samples").OnClick(a.restoreSamples)
+		})
+		if len(a.songs) == 0 {
+			ui.Text(c, "No songs yet").FontSize(11).TextColor(t.TextMuted)
+			return
+		}
+		shown := a.matchingSongs()
+		if len(shown) == 0 {
+			ui.Text(c, "No songs match.").FontSize(11).TextColor(t.TextMuted)
+			return
+		}
+		ui.Scroll(c).Grow(1).Children(func() {
+			ui.Column(c).Gap(2).Children(func() {
+				for _, i := range shown {
+					i := i
+					s := a.songs[i]
+					bg := t.Background
+					if i == a.editSong {
+						bg = t.Selection
+					}
+					ui.Column(c).Padding(8, 10).Gap(2).Radius(6).Background(bg).Label(s.Title).TabStop(true).OnClick(func() { a.selectSong(i) }).Children(func() {
+						ui.Text(c, s.Title).FontSize(12).FontWeight(600).SingleLine()
+						ui.Text(c, songMeta(s)).FontSize(10).TextColor(t.TextMuted).SingleLine()
+					})
 				}
-				shown++
-				i := i
-				row := ui.Button(c, "Edit "+s.Title).OnClick(func() { a.selectSong(i) })
-				if i == a.editSong {
-					row = row.Background(t.Selection)
-				}
-			}
-			if shown == 0 {
-				ui.Text(c, "No songs match.").FontSize(11).TextColor(t.TextMuted).Padding(6)
-			}
+			})
 		})
 	})
 }
 
-// editorMain is the right column: the selected song's header and the two
-// working columns below it.
-func (a *app) editorMain(c *ui.Context) {
+// matchingSongs keeps the real library indices, so a filter can never remap
+// the selection to a different song.
+func (a *app) matchingSongs() []int {
+	q := strings.ToLower(strings.TrimSpace(a.editQuery))
+	out := make([]int, 0, len(a.songs))
+	for i, s := range a.songs {
+		if q == "" || strings.Contains(strings.ToLower(s.Title), q) || strings.Contains(strings.ToLower(s.Author), q) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// songMeta is the muted second line of a library row: who wrote it, and the
+// key when the library knows one.
+func songMeta(s song) string {
+	meta := strings.TrimSpace(s.Author)
+	if s.Key != "" {
+		if meta == "" {
+			return s.Key
+		}
+		return meta + " · " + s.Key
+	}
+	if meta == "" {
+		return "No author"
+	}
+	return meta
+}
+
+// editorSlides is the structure of the selected song: a part header followed
+// by its slides, so a verse split across slides reads as one block.
+func (a *app) editorSlides(c *ui.Context) {
 	t := c.Theme()
-	s, ok := a.selectedSong()
-	if !ok {
+	ui.Column(c).Width(editorSlidesWidth).Gap(8).Children(func() {
+		editorSection(c, "Slides")
+		if _, ok := a.selectedSong(); !ok {
+			ui.Text(c, "Select a song.").FontSize(11).TextColor(t.TextMuted)
+			return
+		}
+		i := a.editSong
+		ui.Scroll(c).Grow(1).Children(func() {
+			ui.Column(c).Gap(12).Children(func() {
+				for j := range a.songs[i].Parts {
+					j := j
+					part := a.songs[i].Parts[j]
+					ui.Column(c).Gap(3).Children(func() {
+						head := t.Background
+						if j == a.editPart {
+							head = t.Surface
+						}
+						ui.Row(c).Padding(6, 8).Radius(6).Background(head).Gap(6).AlignItems(ui.Center).Label(part.Label).TabStop(true).OnClick(func() { a.selectPart(j) }).Children(func() {
+							ui.Text(c, part.Label).FontSize(10).FontWeight(600).TextColor(t.TextMuted).Grow(1).SingleLine()
+							ui.Text(c, fmt.Sprint(len(part.Slides))).FontSize(10).TextColor(t.TextMuted).SingleLine()
+						})
+						for k, text := range part.Slides {
+							k := k
+							line := (slide{Text: text}).firstLine()
+							if strings.TrimSpace(line) == "" {
+								line = "Empty slide"
+							}
+							bg := t.Background
+							if j == a.editPart && k == a.editSlide {
+								bg = t.Selection
+							}
+							ui.Row(c).Padding(7, 8).Radius(6).Gap(8).AlignItems(ui.Center).Background(bg).Label(fmt.Sprintf("%s slide %d", part.Label, k+1)).TabStop(true).OnClick(func() { a.selectEditorSlide(j, k) }).Children(func() {
+								ui.Text(c, fmt.Sprint(k+1)).FontSize(10).TextColor(t.TextMuted).Width(14).SingleLine()
+								ui.Text(c, line).FontSize(11).Grow(1).SingleLine()
+							})
+						}
+					})
+				}
+			})
+		})
+		ui.Row(c).Gap(6).Children(func() {
+			ui.Button(c, "Add slide").OnClick(a.addSlide)
+			ui.Button(c, "Add part").OnClick(a.addEditorPart)
+		})
+	})
+}
+
+// editorInspector edits what is selected: the song's details, the selected
+// part's label, and the selected slide's text. Every field is bound to the
+// library itself, so a change is saved as it is typed.
+func (a *app) editorInspector(c *ui.Context) {
+	t := c.Theme()
+	i := a.editSong
+	if _, ok := a.selectedSong(); !ok {
 		ui.Text(c, "Select a song to edit.").FontSize(12).TextColor(t.TextMuted)
 		return
 	}
 	width, _ := c.Size()
 	ui.Column(c).Grow(1).Children(func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, s.Title).FontSize(20).FontWeight(600).SingleLine()
-			ui.Spacer(c)
-			ui.Button(c, "Add song to run of show").OnClick(a.addEditorSongToDeck)
-			ui.Button(c, "Remove song").OnClick(a.removeSong)
-		})
-		ui.Row(c).Fill().Grow(1).Gap(editorGap).AlignItems(ui.Stretch).Children(func() {
-			a.editorForm(c)
-			a.editorSide(c, width)
-		})
-	})
-}
-
-// editorForm is the left working column: details and parts, scrolled on its
-// own so the preview stays in place while the operator edits below it.
-func (a *app) editorForm(c *ui.Context) {
-	i := a.editSong
-	ui.Scroll(c).Fill().Grow(1).Children(func() {
-		ui.Column(c).Gap(18).Children(func() {
-			ui.Column(c).Gap(10).Children(func() {
-				editorSection(c, "Details")
-				editorLabel(c, "Title")
-				ui.TextInput(c, &a.songs[i].Title).Label("Song title input").OnChange(a.songEdited)
-				ui.Row(c).Gap(10).Children(func() {
-					ui.Column(c).Gap(4).Grow(1).Children(func() {
-						editorLabel(c, "Author")
-						ui.TextInput(c, &a.songs[i].Author).Label("Song author input").OnChange(a.songEdited)
-					})
-					ui.Column(c).Gap(4).Width(80).Children(func() {
-						editorLabel(c, "Key")
-						ui.TextInput(c, &a.songs[i].Key).Label("Song key input").OnChange(a.songEdited)
-					})
-				})
+		ui.Scroll(c).Grow(1).Children(func() {
+			ui.Column(c).Gap(12).Children(func() {
 				ui.Column(c).Gap(6).Children(func() {
-					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-						editorLabel(c, "Text size")
-						ui.Spacer(c)
-						ui.Text(c, fmt.Sprintf("%.0f pt", a.songs[i].textSize())).FontSize(11).TextColor(c.Theme().TextMuted).SingleLine()
-					})
-					ui.Slider(c, &a.songs[i].TextSize, minTextSize, maxTextSize).Step(1).Label("Text size").OnChange(func() {
-						a.setTextSize(a.songs[i].TextSize)
-					})
+					editorSection(c, "Preview")
+					a.editorPreview(c, previewWidth(width))
+					if sl, ok := a.songSlide(); ok {
+						total := len(a.songs[i].Parts[a.editPart].Slides)
+						ui.Text(c, fmt.Sprintf("%s · slide %d of %d", sl.Section, a.editSlide+1, total)).FontSize(11).TextColor(t.TextMuted).SingleLine()
+					}
 				})
+				if a.editPart >= 0 && a.editPart < len(a.songs[i].Parts) && a.editSlide >= 0 && a.editSlide < len(a.songs[i].Parts[a.editPart].Slides) {
+					ui.Column(c).Gap(6).Children(func() {
+						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+							editorSection(c, "Slide text")
+							ui.Spacer(c)
+							ui.Button(c, "Remove slide").OnClick(a.removeEditorSlide)
+						})
+						ui.TextArea(c, &a.songs[i].Parts[a.editPart].Slides[a.editSlide]).Label("Slide text input").Height(130).OnChange(a.songEdited)
+					})
+				}
+				if a.editPart >= 0 && a.editPart < len(a.songs[i].Parts) {
+					ui.Column(c).Gap(8).Children(func() {
+						editorSection(c, "Part")
+						editorLabel(c, "Part label")
+						ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+							ui.TextInput(c, &a.songs[i].Parts[a.editPart].Label).Label("Part label input").Grow(1).OnChange(a.songEdited)
+							ui.Button(c, "Remove part").OnClick(a.removePart)
+						})
+						ui.Button(c, "Add part to run of show").OnClick(a.addEditorPartToDeck)
+					})
+				}
+				ui.Column(c).Gap(10).Children(func() {
+					editorSection(c, "Song details")
+					ui.Row(c).Gap(10).Children(func() {
+						ui.Column(c).Gap(4).Grow(1).Children(func() {
+							editorLabel(c, "Title")
+							ui.TextInput(c, &a.songs[i].Title).Label("Song title input").OnChange(a.songEdited)
+						})
+						ui.Column(c).Gap(4).Width(200).Children(func() {
+							editorLabel(c, "Author")
+							ui.TextInput(c, &a.songs[i].Author).Label("Song author input").OnChange(a.songEdited)
+						})
+						ui.Column(c).Gap(4).Width(80).Children(func() {
+							editorLabel(c, "Key")
+							ui.TextInput(c, &a.songs[i].Key).Label("Song key input").OnChange(a.songEdited)
+						})
+					})
+					ui.Column(c).Gap(6).Children(func() {
+						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+							editorLabel(c, "Text size")
+							ui.Spacer(c)
+							ui.Text(c, fmt.Sprintf("%.0f pt", a.songs[i].textSize())).FontSize(11).TextColor(t.TextMuted).SingleLine()
+						})
+						ui.Slider(c, &a.songs[i].TextSize, minTextSize, maxTextSize).Step(1).Label("Text size").OnChange(func() {
+							a.setTextSize(a.songs[i].TextSize)
+						})
+					})
+					ui.Button(c, "Remove song").OnClick(a.removeSong)
+				})
+				if a.editorStatus != "" {
+					ui.Text(c, a.editorStatus).FontSize(11).TextColor(t.TextMuted)
+				}
 			})
-			a.editorParts(c)
 		})
 	})
 }
 
-// editorSide is the right working column: the preview and the text of the
-// slide the preview shows.
-func (a *app) editorSide(c *ui.Context, windowWidth float32) {
-	t := c.Theme()
-	w := previewWidth(windowWidth)
-	ui.Column(c).Width(w).Gap(10).Children(func() {
-		editorSection(c, "Preview")
-		a.editorPreview(c, w)
-		if s, ok := a.songSlide(); ok {
-			total := 0
-			if a.editSong >= 0 && a.editPart >= 0 && a.editPart < len(a.songs[a.editSong].Parts) {
-				total = len(a.songs[a.editSong].Parts[a.editPart].Slides)
-			}
-			ui.Text(c, fmt.Sprintf("%s · slide %d of %d", s.Section, a.editSlide+1, total)).FontSize(11).TextColor(t.TextMuted).SingleLine()
-		}
-		a.editorSlideText(c)
-		if a.editorStatus != "" {
-			ui.Text(c, a.editorStatus).FontSize(11).TextColor(t.TextMuted)
-		}
-	})
-}
-
-// editorSection is a visible group heading inside the form.
+// editorSection is a visible group heading inside a column.
 func editorSection(c *ui.Context, label string) {
 	ui.Text(c, label).FontSize(12).FontWeight(600).SingleLine()
 }
@@ -212,11 +298,10 @@ func editorLabel(c *ui.Context, label string) {
 	ui.Text(c, label).FontSize(11).TextColor(c.Theme().TextMuted).SingleLine()
 }
 
-// previewWidth fits the 16:9 preview and the form into the space beside the
-// library: the preview takes 46% and the form gets the rest.
+// previewWidth leaves the preview room inside the inspector but never lets it
+// squeeze the fields or shrink below the size the text can still be read at.
 func previewWidth(windowWidth float32) float32 {
-	main := windowWidth - 2*editorPadding - editorListWidth - editorGap
-	w := main * 0.46
+	w := windowWidth - 2*editorPadding - editorSongsWidth - editorSlidesWidth - 2*editorGap
 	if w > editorPreviewMax {
 		w = editorPreviewMax
 	}
@@ -289,7 +374,7 @@ func (a *app) clampSelection(n, i int) int {
 	return i
 }
 
-// selectedSong is the song the right column edits.
+// selectedSong is the song the slides column and inspector edit.
 func (a *app) selectedSong() (song, bool) {
 	if a.editSong < 0 || a.editSong >= len(a.songs) {
 		return song{}, false
@@ -316,75 +401,11 @@ func (a *app) songSlide() (slide, bool) {
 	}, true
 }
 
-// editorParts lists the song's parts and their slides. Each part is a card;
-// its buttons select the row they sit in before acting, so a click always
-// lands on what the operator saw.
-func (a *app) editorParts(c *ui.Context) {
-	t := c.Theme()
-	s, ok := a.selectedSong()
-	if !ok {
-		return
-	}
-	i := a.editSong
-	ui.Column(c).Gap(8).Children(func() {
-		editorSection(c, "Parts")
-		for j := range s.Parts {
-			j := j
-			part := s.Parts[j]
-			ui.Column(c).Gap(8).Padding(10).Radius(8).Background(t.Surface).Children(func() {
-				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-					ui.TextInput(c, &a.songs[i].Parts[j].Label).Label(fmt.Sprintf("Part label %d", j+1)).Grow(1).OnChange(a.songEdited)
-					ui.Button(c, "Remove part").OnClick(func() { a.selectPart(j); a.removePart() })
-				})
-				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-					ui.Button(c, "Add slide").OnClick(func() { a.selectPart(j); a.addSlide() })
-					ui.Button(c, "Add part to run of show").OnClick(func() { a.selectPart(j); a.addEditorPartToDeck() })
-				})
-				if len(part.Slides) == 0 {
-					ui.Text(c, "No slides yet.").FontSize(11).TextColor(t.TextMuted)
-				}
-				for k, text := range a.songs[i].Parts[j].Slides {
-					k := k
-					selected := j == a.editPart && k == a.editSlide
-					line := (slide{Text: text}).firstLine()
-					if strings.TrimSpace(line) == "" {
-						line = "Empty slide"
-					}
-					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-						row := ui.Button(c, fmt.Sprintf("Slide %d", k+1)).OnClick(func() { a.selectEditorSlide(j, k) })
-						if selected {
-							row = row.Background(t.Selection)
-						}
-						ui.Text(c, line).FontSize(11).TextColor(t.TextMuted).Grow(1).SingleLine()
-						if selected {
-							ui.Button(c, "Remove slide").OnClick(func() { a.selectEditorSlide(j, k); a.removeEditorSlide() })
-						}
-					})
-				}
-			})
-		}
-		ui.Button(c, "Add part").OnClick(a.addEditorPart)
-	})
-}
-
-// editorSlideText edits the selected slide's text. The area is bound to the
-// library string itself, so what is typed is what a preview and a save see.
-func (a *app) editorSlideText(c *ui.Context) {
+// selectPart moves the editor to a part and its first slide.
+func (a *app) selectPart(j int) {
 	if a.editSong < 0 || a.editSong >= len(a.songs) {
 		return
 	}
-	s := a.songs[a.editSong]
-	if a.editPart < 0 || a.editPart >= len(s.Parts) || a.editSlide < 0 || a.editSlide >= len(s.Parts[a.editPart].Slides) {
-		return
-	}
-	ui.Column(c).Gap(4).Children(func() {
-		editorSection(c, "Slide text")
-		ui.TextArea(c, &a.songs[a.editSong].Parts[a.editPart].Slides[a.editSlide]).Label("Slide text input").Height(170).OnChange(a.songEdited)
-	})
-}
-
-// selectPart moves the editor to a part and its first slide.
-func (a *app) selectPart(j int) {
 	if j < 0 || j >= len(a.songs[a.editSong].Parts) {
 		return
 	}
@@ -435,7 +456,8 @@ func (a *app) setTextSize(v float64) {
 	a.changed()
 }
 
-// newSong appends an empty draft and selects it.
+// newSong appends an empty draft and selects it. It clears the filter, so the
+// new row is never hidden by a search the operator forgot about.
 func (a *app) newSong() {
 	s := song{
 		ID:       newSongID("New Song", a.songs),
@@ -443,6 +465,7 @@ func (a *app) newSong() {
 		TextSize: defaultTextSize,
 		Parts:    []songPart{{Label: "Verse 1", Slides: []string{""}}},
 	}
+	a.editQuery = ""
 	a.songs = append(a.songs, s)
 	a.selectSong(len(a.songs) - 1)
 	a.saveLibrary()
@@ -463,7 +486,7 @@ func (a *app) removeSong() {
 	a.changed()
 }
 
-// addPart appends an empty part and selects it.
+// addEditorPart appends an empty part and selects it.
 func (a *app) addEditorPart() {
 	i := a.editSong
 	if i < 0 || i >= len(a.songs) {
@@ -511,7 +534,8 @@ func (a *app) addSlide() {
 	a.changed()
 }
 
-// removeSlide never empties a part: the last slide stays with a status note.
+// removeEditorSlide never empties a part: the last slide stays with a status
+// note.
 func (a *app) removeEditorSlide() {
 	i, j, k := a.editSong, a.editPart, a.editSlide
 	if i < 0 || i >= len(a.songs) || j < 0 || j >= len(a.songs[i].Parts) {

@@ -228,19 +228,19 @@ the view.
 **Song editor** in the console header asks for a separate window:
 `requestEditor` sets `a.openEditor`, `settle()` clears the flag in the next
 pass and calls `openEditorWindow`, which reuses an open window or creates
-one with `a.newWindow` — Title `mygo-demo — Song editor`, 1200×800, minimum
-980×660, `StateKey: "editor"`, `Content: ui.View(a.editorView)`, and an
+one with `a.newWindow` — Title `mygo-demo · Song editor`, 1280×820, minimum
+1120×700, `StateKey: "editor"`, `Content: ui.View(a.editorView)`, and an
 `OnClosed` guard of `if a.editor != w { return }`. `closeEditor` nils the
 pointer before `Close()`, so a stale close cannot drop a new window.
 
-The left column (260 wide) holds the search box, `New song`,
-`Restore samples` and one `Edit <title>` row per song. The right column
-scrolls: a title row, the metadata fields, the text-size slider, a 16:9
-preview in the stage theme, the parts and their slides, and a `TextArea` for
-the selected slide. The preview is capped at 720 wide and floored at 320,
-and `previewWidth` derives that from `c.Size()`. `editorPreview` draws the
-slide through the same `slideBody` and `metricsFor` as `liveView`, so what
-the editor shows is what the stage shows at that size.
+The window is three columns: a 220-wide song list (search, `New song`,
+`Restore samples`, one clickable row per song), a 260-wide slide list (one
+header per part, one row per slide), and a scrolling inspector with the 16:9
+preview, the selected slide's text, the selected part's label, and the song's
+title, author, key and text size. The preview is capped at 420 wide and
+floored at 360, and `previewWidth` derives that from `c.Size()`. `editorPreview`
+draws the slide through the same `slideBody` and `metricsFor` as `liveView`, so
+what the editor shows is what the stage shows at that size.
 
 Every metadata field, label, text area and the slider updates the `songs`
 model and calls `songEdited`/`setTextSize`, which clamp the size, save the

@@ -80,13 +80,14 @@ the project's key, so an app accepts only updates it can verify.
 
 ## Editing songs
 
-**Song editor** in the console header opens a second window for the song
-library. A song has an author, a key, a text size, and one or more **parts**
-(a verse, a chorus, a bridge); each part holds one or more **slides**, and a
-slide is the text that fills one stage frame. **Add song** puts every part in
-the run of show in order; a part's **Add part to run of show** adds it again
-where the arrangement needs it, so a chorus can follow every verse without
-another copy of the song.
+**Song editor** in the console header opens a separate window for the song
+library. Pick a song in the left list, a slide in the middle list, and edit it
+in the inspector on the right. A song has an author, a key, a text size, and
+one or more **parts** (a verse, a chorus, a bridge); each part holds one or
+more **slides**, and a slide is the text that fills one stage frame. **Add
+song** puts every part in the run of show in order; a part's **Add part to
+run of show** adds it again where the arrangement needs it, so a chorus can
+follow every verse without another copy of the song.
 
 Every edit saves to `library.json` in the app data directory, so a song
 written once survives a restart. A first launch seeds that file from the
