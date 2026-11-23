@@ -37,15 +37,15 @@ func (a *app) liveView(c *ui.Context) {
 	if a.blackout {
 		ui.Column(c).Fill().Background(ui.Hex(stageBackgroundHex)).DragWindow()
 	} else {
-		ui.Column(c).Fill().Background(t.Background).Padding(56, 72).Justify(ui.Center).AlignItems(ui.Center).DragWindow().Children(func() {
-			s, ok := a.stageSlide()
+		s, ok := a.stageSlide()
+		width, _ := c.Size()
+		m := metricsFor(width, s.TextSize)
+		ui.Column(c).Fill().Background(t.Background).Padding(m.PadX, m.PadY).Justify(ui.Center).AlignItems(ui.Center).DragWindow().Children(func() {
 			if !ok {
 				ui.Text(c, "Nothing on stage").FontSize(24).TextColor(t.TextMuted)
 				return
 			}
-			ui.Text(c, s.eyebrow()).FontSize(14).FontWeight(600).LetterSpacing(2).TextColor(t.Accent).SingleLine()
-			ui.Text(c, s.Text).FontSize(40).LineHeight(1.3).TextAlign(ui.Center).TextColor(t.Text)
-			ui.Text(c, s.caption()).FontSize(16).TextColor(t.TextMuted)
+			slideBody(c, s, m)
 		})
 	}
 

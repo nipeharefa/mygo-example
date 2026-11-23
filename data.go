@@ -44,9 +44,13 @@ type versePack struct {
 // textSize is the size the output should draw: a zero value from an older
 // file means the default, and anything out of range is pulled back in.
 func (s song) textSize() float64 {
-	size := s.TextSize
+	return clampTextSize(s.TextSize)
+}
+
+// clampTextSize makes any stored size usable by the slider and the renderer.
+func clampTextSize(size float64) float64 {
 	if size <= 0 {
-		size = defaultTextSize
+		return defaultTextSize
 	}
 	if size < minTextSize {
 		return minTextSize

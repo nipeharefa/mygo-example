@@ -189,3 +189,22 @@ func TestSetNDIOffClearsThePreference(t *testing.T) {
 		t.Fatalf("NDI is still publishing: ndi=%v err=%q", a.ndi, a.ndiErr)
 	}
 }
+
+func TestLiveViewUsesSlideSize(t *testing.T) {
+	a := newApp()
+	a.deck[a.stage].TextSize = 60
+	tt := testLive(a)
+	s := mustStage(t, a)
+	if !tt.HasText(s.firstLine()) {
+		t.Fatalf("the live view does not show %q at size 60", s.firstLine())
+	}
+}
+
+func TestLiveViewScalesTextAtHalfWidth(t *testing.T) {
+	a := newApp()
+	tt := ui.NewTester(a.liveView, 640, 360)
+	s := mustStage(t, a)
+	if !tt.HasText(s.firstLine()) {
+		t.Fatalf("the live view does not show %q at 640 wide", s.firstLine())
+	}
+}
