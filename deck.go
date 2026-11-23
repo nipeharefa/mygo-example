@@ -56,21 +56,24 @@ func (a *app) newSlide(s slide) slide {
 	return s
 }
 
-// addSong appends every section of the song and moves the monitor to its
-// first slide. The stage is untouched until the operator takes it.
+// addSong appends every slide of the song, part by part, and moves the
+// monitor to its first slide. The stage is untouched until the operator
+// takes it.
 func (a *app) addSong(id string) {
 	s, ok := songByID(id)
 	if !ok {
 		return
 	}
 	first := len(a.deck)
-	for _, section := range s.Sections {
-		a.deck = append(a.deck, a.newSlide(slide{
-			Title:   s.Title,
-			Section: section.Label,
-			Text:    section.Text,
-			Kind:    slideSong,
-		}))
+	for _, part := range s.Parts {
+		for _, text := range part.Slides {
+			a.deck = append(a.deck, a.newSlide(slide{
+				Title:   s.Title,
+				Section: part.Label,
+				Text:    text,
+				Kind:    slideSong,
+			}))
+		}
 	}
 	a.preview = first
 	a.changed()

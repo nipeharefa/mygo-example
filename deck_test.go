@@ -2,16 +2,17 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
 func TestDataIsReachable(t *testing.T) {
-	if len(songs) < 4 {
-		t.Fatalf("songs = %d, want at least 4", len(songs))
+	if len(builtinSongs) < 4 {
+		t.Fatalf("builtinSongs = %d, want at least 4", len(builtinSongs))
 	}
 	seenSongs := map[string]bool{}
-	sections := 0
-	for _, s := range songs {
+	slides := 0
+	for _, s := range builtinSongs {
 		if s.ID == "" || s.Title == "" {
 			t.Errorf("song missing id or title: %+v", s)
 		}
@@ -19,24 +20,32 @@ func TestDataIsReachable(t *testing.T) {
 			t.Errorf("duplicate song id %q", s.ID)
 		}
 		seenSongs[s.ID] = true
-		if len(s.Sections) == 0 {
-			t.Errorf("song %q has no sections", s.ID)
+		if len(s.Parts) == 0 {
+			t.Errorf("song %q has no parts", s.ID)
 		}
-		for _, sec := range s.Sections {
-			if sec.Label == "" || sec.Text == "" {
-				t.Errorf("song %q has an empty section", s.ID)
+		for _, part := range s.Parts {
+			if part.Label == "" {
+				t.Errorf("song %q has an empty part label", s.ID)
 			}
-			sections++
+			if len(part.Slides) == 0 {
+				t.Errorf("song %q part %q has no slides", s.ID, part.Label)
+			}
+			for _, text := range part.Slides {
+				if strings.TrimSpace(text) == "" {
+					t.Errorf("song %q part %q has a blank slide", s.ID, part.Label)
+				}
+				slides++
+			}
 		}
 	}
-	if sections < 8 {
-		t.Fatalf("sections = %d, want at least 8", sections)
+	if slides < 8 {
+		t.Fatalf("slides = %d, want at least 8", slides)
 	}
-	if _, ok := songByID(songs[0].ID); !ok {
-		t.Errorf("songByID(%q) not found", songs[0].ID)
+	if _, ok := findSong(builtinSongs, builtinSongs[0].ID); !ok {
+		t.Errorf("findSong(%q) not found", builtinSongs[0].ID)
 	}
-	if _, ok := songByID("no-such-song"); ok {
-		t.Error("songByID accepted an unknown id")
+	if _, ok := findSong(builtinSongs, "no-such-song"); ok {
+		t.Error("findSong accepted an unknown id")
 	}
 
 	if len(packs) < 3 {

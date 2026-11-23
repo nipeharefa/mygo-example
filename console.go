@@ -177,7 +177,7 @@ func (a *app) songLibrary(c *ui.Context) {
 		ui.Scroll(c).Grow(1).Children(func() {
 			ui.Column(c).Gap(6).Padding(0, 12, 12).Children(func() {
 				found := false
-				for _, s := range songs {
+				for _, s := range builtinSongs {
 					if !songMatches(s, a.songQuery) {
 						continue
 					}
