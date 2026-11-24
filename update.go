@@ -12,6 +12,21 @@ import (
 // never answers cannot leave the check pending for the rest of the session.
 const updateTimeout = 20 * time.Second
 
+// The update channels: stable, the default, takes only what a non-prerelease
+// release publishes, and beta takes the highest version published at all.
+const (
+	updateChannelStable = iota
+	updateChannelBeta
+)
+
+// updateChannelOf is the number settings.json stores for a channel.
+func updateChannelOf(beta bool) int {
+	if beta {
+		return updateChannelBeta
+	}
+	return updateChannelStable
+}
+
 // updatableOverride lets a test build say it can update itself: a plain
 // binary outside an app bundle never can, so Updater.Enabled answers false
 // there and the dialog path would stay out of reach.
@@ -66,6 +81,9 @@ func (a *app) checkForUpdates() {
 	ctx := a.ctx
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if a.setBeta != nil {
+		a.setBeta(a.updateChannel)
 	}
 	check := a.updateChk
 	// The result arrives on this channel, one send at a time: the ask that
@@ -144,6 +162,22 @@ func (a *app) installUpdate(ctx context.Context, res checkResult) {
 	if a.updateRun != nil {
 		a.updateRun()
 	}
+}
+
+// updateChannelToggled runs when Settings turns the beta channel on or off.
+// The choice is saved and used by the next check; it does not start one, so a
+// stray switch cannot put a dialog up.
+func (a *app) updateChannelToggled() {
+	a.saveSettings()
+	a.changed()
+}
+
+// updateChannelNote explains what the channel switch does to the next check.
+func (a *app) updateChannelNote() string {
+	if a.updateChannel {
+		return "Shows the latest beta as well, when there is one."
+	}
+	return "Shows only stable releases."
 }
 
 // sayUpdates shows one note with a single button, which is all a check that

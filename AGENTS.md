@@ -6,17 +6,19 @@ verses, previews the next slide on a monitor and sends one slide to a
 separate stage window, and can publish that stage as an NDI source on
 macOS, Windows and Linux. The NDI feed draws the slide itself, so publishing
 needs no window on screen and one monitor is enough. The Go side is the whole app: package `main`
-builds the console plus on-demand stage, Settings and Help windows with
-`github.com/egoist/mygo/ui`, and there is no network access, no database,
-and no web page in use.
+builds the console plus on-demand stage, Song editor, Settings and Help
+windows with `github.com/egoist/mygo/ui`, and there is no network access
+and no web page in use. The one database is `history.db`, a local SQLite
+file of song versions that never replaces the JSON library.
 
 The sign-in is a demo gate, not security: the account is the
 `demoUsername`/`demoPassword` pair in `main.go`, `signedIn` lives on
 `app`, and nothing lasts beyond the process except the display and NDI
-preferences, which are a small JSON file in the app data directory.
+preferences in `settings.json`, the song library in `library.json` and the
+run of show in `show.json`, small JSON files in the app data directory.
 
 **Read [docs/architecture.md](docs/architecture.md) before changing the
-view.** It describes the state model, the two windows, the frame contract,
+view.** It describes the state model, every window, the frame contract,
 the widget choices, and the testing approach. The MyGo lifetime and
 identity rules live in
 [.agents/skills/mygo-maintenance/SKILL.md](.agents/skills/mygo-maintenance/SKILL.md).
@@ -33,9 +35,13 @@ identity rules live in
   `stageBackgroundHex` for the output window's background. Everything else
   reads `c.Theme()`, so light and dark appearance and the system accent and
   text-scale preferences keep working.
-- **Mutate state from callbacks, then redraw every window.** Every state
-  method ends with `a.changed()`, which invalidates `a.win`, `a.live`,
-  `a.settings` and `a.help` (each nil-safe). Call it from
+- **Mutate state from callbacks, then redraw the windows that changed.**
+  Deck and session methods end with `a.changed()`, which invalidates `a.win`,
+  `a.live`, `a.editor`, `a.settings` and `a.help` (each nil-safe). Library
+  edits go through `a.saveNote`/`a.editorRedraw(console bool)`: the editor
+  always, the console only when the change can show there (a title, author,
+  key or a new or removed song). A slide-text keystroke must not repaint the
+  run of show, because the deck keeps its own copy. Call these from
   `OnClick`/`OnSubmit`/`OnChange`/shortcut/menu callbacks, never from
   inside the build pass.
 - **The stage is the output, and NDI publishes only it.** The feed is
@@ -64,16 +70,20 @@ identity rules live in
   selects on the stream's stop channel, so Stop never waits for a draw.
 - **The monitor never reaches the room by itself.**
   `selectSlide`/`nextSlide`/`prevSlide` move `a.preview`; only
-  `takeSlide` (Go Live, Enter on the list, Cmd/Ctrl+Enter) and the stage
-  window's own next/prev move `a.stage`. `nextStage`/`prevStage` pull the
-  monitor along so the highlight follows the room. Do not wire a console
-  control straight to `a.stage`.
+  `takeSlide` (Go Live, Enter in the console, the tile's own **▶**,
+  Cmd/Ctrl+Enter) and the stage window's own next/prev move `a.stage`.
+  A tile's controls take their slide index (`takeSlideAt`, `moveSlideAt`,
+  `removeSlideAt`) and pull the monitor to it first, so the tile clicked is
+  the slide that acts. `nextStage`/`prevStage` pull the monitor along so the
+  highlight follows the room. A drag reorders the deck, it never takes a
+  slide. Do not wire a console control straight to `a.stage`.
 - **Keep the song and scripture text public domain.** `data.go` holds the
   5 traditional hymns and the 4 KJV verse packs; the KJV (1611) and those
   hymn texts are public domain. Do not paste in copyrighted lyrics or a
-  modern Bible translation. Each song needs at least one section, and every
-  verse reference must be unique, because the deck and the library look
-  verses up by reference (`deck_test.go` checks both).
+  modern Bible translation. Each song needs at least one part with one
+  slide, and every verse reference and song id must be unique, because the
+  deck and the library look them up by reference (`data_test.go` and
+  `deck_test.go` check these).
 - **Verify against the pinned API, not memory.** Resolve the source with
   `go list -m -f '{{.Dir}}' github.com/egoist/mygo`, then read `ui/doc.go`
   and the widget you are using. The app pins v0.10.0 in `go.mod`;
@@ -87,12 +97,13 @@ identity rules live in
   closes the output and stops NDI.
 - **Windows are created outside the event that asks for them, and tests
   never open one.** `mygo.NewWindow` is called only through `a.newWindow`,
-  from `openOutput` and `openHelp` after `WhenReady`, never from the build
-  pass and never from a test, because a headless `ui.Tester` has no
-  application. The console asks for the stage with `requestStage`;
-  `settle()` turns that into `a.openStage`, and `view` asks for a later
-  pass (`c.After(openStageDelay)`), so `openOutput` runs in a frame that no
-  event is waiting on. That is what keeps Open output from hanging: creating
+  from `openOutput`, `openEditorWindow` and `openHelp` after `WhenReady`,
+  never from the build pass and never from a test, because a headless
+  `ui.Tester` has no application. The console asks for the stage with
+  `requestStage` and for the Song editor with `requestEditor`; `settle()`
+  turns those into `a.openStage`/`a.openEditor`, and `view` asks for a
+  later pass (`c.After(openStageDelay)`), so the window is created in a
+  frame that no event is waiting on. That is what keeps Open output from hanging: creating
   and showing a window inside the click, and then placing it with
   `SetPosition`/`SetFullScreen`, waited on a window that was not on screen
   yet. Never call a `mygo.Window` method from inside the build pass either;
@@ -106,12 +117,60 @@ identity rules live in
   closes and reopens it. Never reopen it from a display notification, and
   nil `a.live` before `Close()` — a `Close()` whose `OnClosed` guard has
   already been satisfied never destroys the window.
-- **Settings persistence is the only persistence.**
-  `settings.go` reads and writes `settings.json` (display ID, NDI on/off,
-  NDI frame size)
+- **Three JSON files hold the app's state: the settings, the song library
+  and the run of show.** `settings.go` reads and writes `settings.json` (display ID, NDI
+  on/off, NDI frame size), `library.go` reads `library.json` (the songs,
+  their parts, slides and text size) and `show.go` reads and writes
+  `show.json` (the deck, the monitor and stage rows, the next slide id), all
   in `mygo.App.Path(mygo.PathUserData)`. `a.settingsDir` is empty until
-  `WhenReady` and in tests, and `saveSettings` then does nothing. The run
-  of show is session-only; do not persist it unasked.
+  `WhenReady` and in tests, and every save then does nothing. A first launch
+  seeds `library.json` from `builtinSongs` and the deck from Amazing Grace
+  and Psalm 23:1; after that the files are the library and the set. Every
+  write goes through `writeFileAtomic`: a temporary file beside the target,
+  then a rename, so a crash cannot leave half a file. `changed()` calls
+  `saveShow`, and `saveShow` skips the write when the serialized deck is
+  what it last wrote, so a repaint costs no disk. `show.json` from a newer
+  version is refused and never overwritten (`a.showBlocked`), with
+  `a.showNote` saying so on the Settings page.
+- **Backups are a folder of bundles, and a restore asks first.** A
+  successful `saveLibrary` and a successful `saveShow` call
+  `snapshotDaily`, which writes `backups/backup-YYYY-MM-DD.json` (songs and
+  run of show in one file) once per process-day, then prunes 14 daily
+  copies and 20 safety copies. `backup.go` owns it: `backUpSongs` and
+  `chooseRestore`/`confirmRestore` use the native file dialogs through the
+  `a.saveFile`/`a.openFile` seams, which tests answer instead of opening a
+  dialog. A restore is a question on the Settings page
+  (`a.restoreWaiting`); it writes `backups/before-restore-…json` before it
+  replaces the songs, and the run of show when the backup has one. Keep the
+  snapshots out of a synced folder: they are this machine's history.
+- **The songs may live in a folder another machine syncs, and that copy
+  wins only on purpose.** `a.libraryFolder` (saved in `settings.json`) moves
+  `library.json` there; `show.json`, `settings.json` and `backups/` stay in
+  the app data directory. `sync.go` owns the folder: choosing one reads the
+  folder's library and asks on the Settings page (`a.folderWaiting`) whether
+  to use those songs or to write the ones here, copying the current state
+  into `backups/` first. A folder that is missing or unreadable blocks every
+  write (`a.libraryBlocked`) rather than seeding over it. Before a write,
+  `saveLibrary` compares the file's hash with `a.libraryStamp`; a difference
+  asks through `a.askMessage` (reload the other file, or keep these songs and
+  save the other copy as `backups/conflict-…json`). One machine edits at a
+  time; there is no watcher, so a reload is the prompt or the **Reload**
+  button.
+- **Version history is a local SQLite file, never the library.** `history.db`
+  holds one row per saved library (`history.go`, `history_sqlite.go`), with
+  the whole library as text, so a restore needs no replay. `openHistory` runs
+  in `WhenReady` and records the starting state; `saveNote` and the restores
+  call `noteHistory`, which arms one trailing timer (`historyEvery`, 5 s) so a
+  burst of typing is one version, and `flushHistory` skips a state already
+  stored by hash. The last 200 are kept. The **Version history** page
+  (`pageHistory`) lists them and asks before a restore, backing up the state
+  it replaces first. The store sits behind `historyStore`, so the app tests
+  use a fake; `history_sqlite_test.go` tests the real store and skips where
+  the native module cannot load (freebsd, or a development download that
+  failed). A module that does not load leaves history off with
+  `a.historyNote` and nothing else stops. Development and `go test` download
+  the native module once (2.2 MB, `~/Library/Caches/mygo/natives`); a
+  packaged build bundles it.
 - **Do not edit `src/mygo.ts` by hand.** It is `mygo generate` output, and
   the web frontend is currently unused (see "Known state").
 - **NDI output stays pure Go, and the binding lives in one file.**
@@ -195,10 +254,19 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 
 | Path | What |
 | --- | --- |
-| `main.go` | The app: `app` state and its `newWindow`/`mainScreen` seams, the demo account, sign-in/out, `changed`, `requestStage`/`settle`, `tickStats`, `setNDI`/`toggleNDI`/`ndiLabel`, `main()` startup order (app data dir, saved preferences, menu, display subscription, console window, first display refresh, stats timer), and the `stageSourceName` constant. |
-| `data.go` | The library: 5 public-domain hymns (10 sections) and 4 KJV verse packs (16 verses), plus `songByID`/`verseByRef`. No data here is fetched or stored. |
-| `deck.go` | The run-of-show model: `slide`, `slideKind`, add/select/next/prev (monitor), `takeSlide`, `nextStage`/`prevStage`, remove/move/blackout, `reorderSlides` (the drag and Move up/down path, `to` is a gap), `stageSlide`/`previewSlide`/`upcomingSlide`, `clampSlides`. |
-| `console.go` | The console view: top bar, library (Songs/Bible tabs, search, pack picker), run of show list with the LIVE badge, the two-card stage/monitor panel with Go Live, and the login card. |
+| `main.go` | The app: `app` state and its `newWindow`/`mainScreen` seams, the demo account, sign-in/out, `changed` (which saves the run of show), `requestStage`/`settle`, `tickStats`, `setNDI`/`toggleNDI`/`ndiLabel`, `main()` startup order (app data dir, saved preferences, library, run of show, menu, display subscription, console window, first display refresh, stats timer), and the `stageSourceName` constant. |
+| `data.go` | The seed library: `builtinSongs` (5 public-domain hymns as `song{... Parts []songPart}`), 4 KJV verse packs (16 verses), `findSong`, `verseByRef`, the text-size limits and `clampTextSize`. |
+| `deck.go` | The run-of-show model: `slide` (including its snapshotted `TextSize`), `slideKind`, add/select/next/prev (monitor), `addSongParts`/`addPartSlides`/`addPart`, `takeSlide`/`takeSlideAt`, `nextStage`/`prevStage`, remove/move/blackout (`removeSlideAt`, `moveSlideAt`), `reorderSlides` (the move path, `to` is a gap), `stageSlide`/`previewSlide`/`upcomingSlide`, `clampSlides`. |
+| `library.go` | The song library: `library.json` read/write and versioning, `loadLibrary`/`saveLibrary`, first-launch seeding from `builtinSongs`, `normalizeLibrary`, `cloneSongs`, `newSongID`, and `(a *app) songByID`/`libraryPath`. |
+| `show.go` | The run of show on disk: `show.json` read/write and versioning, `loadShow`/`saveShow`, the id counter the restored deck needs, and the refusal that keeps a newer file from being overwritten. |
+| `store.go` | `writeFileAtomic`, the one way a data file is replaced: a temporary file beside the target, a sync, a rename. |
+| `backup.go` | Backups and restores: `backupBytes` (songs and show in one bundle), `snapshotDaily` and `pruneBackups`, `snapshotNow` for a restore or a conflict, `decodeBackup` (a bundle, or a plain library file), `backUpSongs`, and `chooseRestore`/`confirmRestore`/`cancelRestore` with the restore question on the Settings page. |
+| `sync.go` | The songs folder: `chooseSongsFolder`/`confirmFolder`/`cancelFolder`, `useAppFolder`, `reloadLibrary`, and the note that says why a folder action did nothing. The write-side conflict guard lives in `library.go`. |
+| `history.go` | Version history: the `historyStore` interface, `openHistory`/`recordOpened`/`noteHistory`/`flushHistory`, the restore that asks first, and the `pageHistory` view. |
+| `history_sqlite.go` | The SQLite store behind that interface: `openSQLiteHistory`, the schema version and `revisions` table, add/recent/library/prune/close. |
+| `editor.go` | The Song editor window: `requestEditor`/`openEditorWindow`/`closeEditor`, the library card and search, the part/slide outline, the Slide/Song desk (`editorSlideDesk` with the preview, the text area and the header's **Remove part**, `editorSongDesk` with the details and the delete confirmation), `FocusBind` through `editorFocus`, `saveNote`/`editorRefused`, the New song and Paste words dialogs (`splitSlides`, `nextPartLabel`), and adding a song or part to the run of show. |
+| `slideview.go` | The shared slide renderer: `stageDesignWidth`/`Height`, `stageScale`, `slideMetrics`/`metricsFor`, and `slideBody`, used by the stage window, the NDI feed, the editor preview and the run of show's tiles. It draws the slide's text alone: the output carries no part label or song caption. |
+| `console.go` | The console view: top bar (including **Song editor** and the **Account** pane holding Settings, Check for Updates and Sign out), library (Songs/Bible tabs, search, pack picker), the run of show as a grid of whole-slide tiles grouped under each song (`deckGroups`, `deckGrid`, `deckTile`) with a go-live/move/remove toolbar per tile and drag-to-reorder on the picture (`deckDrag`, `dragLandsAfter`, `pendingDrop` applied by `settle`), the two-card stage/monitor panel with Go Live, and the login card. |
 | `output.go` | The stage window: `liveView`, stage shortcuts, `openOutput`/`closeOutput`/`togglePresent`, `placeStage`/`shutStage`. |
 | `theme.go` | The only file with literal colors: warm console theme (light/dark) and the forced-dark stage theme. |
 | `menu.go` | `buildMenu` (app, edit, Settings, Help menus; no Check for Updates, because the Help menu is macOS-only in MyGo) and `showAbout`. |
@@ -207,6 +275,16 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `update.go` | The Check for Updates button: `lookForUpdate` (the feed, with a timeout), `checkForUpdates`/`showCheck` (the offer), `installUpdate`, `sayUpdates`, and `newerVersion` for the comparison. |
 | `update_test.go` | The updater without a window or a feed: version order, the newest-version and error notes, the offer, install-and-restart, Not Now, a failed install, and the two builds that cannot update. |
 | `view_test.go` | Headless console tests: login gate, library, add/search, monitor vs stage (click, Go Live, Enter, Cmd+Enter), arrows, blackout, empty deck, sign out. |
+| `library_test.go` | The library file without a window: round-trip, version/duplicate rejection, seeding, corrupt files, empty lists, normalization, clones, new ids. |
+| `show_test.go` | The run of show on disk without a window: round-trip, the cursor clamped, the seed kept when there is no file, a newer version refused and not overwritten, ids repaired, no write when nothing changed, a reported failure, and the file's keys. |
+| `store_test.go` | `writeFileAtomic`: replaces in one step, leaves no temporary file, keeps the old file when the write fails, creates the directory, and writes 0644. |
+| `backup_test.go` | The backup without a window or a dialog: bundle round-trip, a plain library accepted, a newer bundle refused, one daily snapshot per day (from a library save and from a show save), pruning to 14 and 20, the chosen file written, cancel and failure, restore asking before it changes anything, the safety copy, a plain library keeping the deck, a bad file refused, cancel, and the question answered on the Settings page. |
+| `sync_test.go` | The chosen folder: remembered in settings, a fresh folder taking the songs here, a folder's songs adopted, cancel, a bad library refused, a missing folder read-only, the app's folder taken back, a conflict reloaded or kept with the other copy saved, no question for this app's own writes, the Reload action, and the folder card and its question on the Settings page. |
+| `history_test.go` | Version history with a fake store: the starting state recorded once, a pause recording one version, the same content skipped, history off without a store, a restore that asks and backs up first, a missing version, the list page, the empty and off pages, a restore from the page, and Settings opening the page. |
+| `history_sqlite_test.go` | The real store: add and read back, newest first, prune, reopen, and a newer schema refused; skips where the native module cannot load. |
+| `data_test.go` | The built-in seeds: parts and slides, the All Creatures split, text-size defaults/clamps, slide counts, `findSong`. |
+| `slideview_test.go` | The shared renderer's scale and metrics at full and half width. |
+| `editor_test.go` | The editor headless: window lifecycle, console button, list/search/selection/width, tabs, typing (focus on open, song, slide and add; live preview; per-slide text; undo), save failures, split/duplicate/paste, part naming, part and slide guards (including removing a part or an empty part from the Slide tab), the song delete confirmation, new/remove/restore, add-to-show, and the deck staying a snapshot. |
 | `menu_test.go` | Headless menu structure: item IDs, accelerator, click handlers present (clicks not run). |
 | `settings_test.go` | Settings round-trip (display, NDI, frame size), missing/corrupt defaults, legacy `outputDisplay` migration, `stageDisplayFound`, the Settings page rendering, display refresh without reopening the stage. |
 | `deck_test.go` | Headless model tests: data reachability, ids, clamping, reorder, blackout, `changed()` without windows. |
@@ -223,20 +301,21 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `ndi_render_stub.go` | The same size functions for the builds without a sender, so `main.go` compiles everywhere. |
 | `automation_e2e.go` | The `e2e`-tagged import of the MyGo automation plugin, so a built app can be driven over `MYGO_AUTOMATION`; no release build has it. |
 | `ndi_source_test.go` | The rendered feed: BGRA order, the size cap, the whole slide at odd and large sizes, a blacked-out frame, following the stage, and Stop not waiting on a draw. |
-| `README.md` | What a downloader needs: installers, the demo account, running a service, shortcuts, and the per-platform NDI instructions (the runtime, not a window, is what NDI needs). |
+| `README.md` | What a downloader needs: installers, the demo account, running a service, the Song editor, shortcuts, and the per-platform NDI instructions (the runtime, not a window, is what NDI needs). |
 | `mygo.config.ts` | Packaging: name, identifier, version, output directory. `devUrl`, `devCommand`, `buildCommand` and `frontendDist` are inert for a native view. |
 | `src/`, `index.html`, `vite.config.ts` | Leftover web template; nothing renders it. |
 | `.github/workflows/ci.yml` | The test gate, a native Windows run that launches the binary, the macOS/Windows/Linux packaging matrix, and a release job on `v*` tags. |
 | `docs/architecture.md` | How the app works; read this next. |
-| `docs/superpowers/plans/` | Historical plans: the 0.2.0 worship presenter, the monitor/Settings beta, the stage/Settings fix in beta.4, and the rendered NDI feed in beta.5. |
+| `docs/superpowers/plans/` | Historical plans: the 0.2.0 worship presenter, the monitor/Settings beta, the stage/Settings fix in beta.4, the rendered NDI feed in beta.5, and the editable song library. |
 
 ## Known state, deliberately untouched
 
 The web scaffold (`src/`, `index.html`, `vite.config.ts`, the `devUrl` and
 frontend settings in `mygo.config.ts`) and the `tick` event in
 `src/mygo.ts` predate the native UI and are unused. `dist/` is still built
-and embedded, but no window loads it. The run of show is not persisted,
-there is no undo/redo, and no media beyond text; only the display and NDI
-preferences survive a restart. These are recorded in
+and embedded, but no window loads it. A mistaken removal can be undone from
+the version history page or a backup, not with a keystroke: the display and
+NDI preferences, the song library, the run of show and song versions survive
+a restart. These are recorded in
 `docs/architecture.md` under "Known drift and gaps"; do not clean them up
 unasked.

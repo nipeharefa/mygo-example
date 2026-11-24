@@ -17,14 +17,16 @@ const (
 )
 
 type slide struct {
-	ID      string
-	Title   string
-	Section string
-	Text    string
-	Kind    slideKind
+	ID       string
+	Title    string
+	Section  string
+	Text     string
+	Kind     slideKind
+	TextSize float64 // snapshot of the song's stage size when the slide was added
 }
 
-// caption names the slide under the stage preview.
+// caption names the slide in the console: a row's accessible name, and what
+// the run of show calls it. It is not drawn on the output.
 func (s slide) caption() string {
 	if s.Kind == slideVerse {
 		return s.Title
@@ -32,15 +34,7 @@ func (s slide) caption() string {
 	return s.Title + " · " + s.Section
 }
 
-// eyebrow is the small uppercase line above the slide text.
-func (s slide) eyebrow() string {
-	if s.Kind == slideVerse {
-		return "SCRIPTURE"
-	}
-	return strings.ToUpper(s.Section)
-}
-
-// firstLine is the slide's opening line, used to preview a deck row.
+// firstLine is the slide's opening line, used by the editor's slide list.
 func (s slide) firstLine() string {
 	if i := strings.IndexByte(s.Text, '\n'); i >= 0 {
 		return s.Text[:i]
@@ -50,30 +44,80 @@ func (s slide) firstLine() string {
 
 // newSlide stamps the next unique id on a slide. The id, not the position,
 // is the list's identity, so the same song can appear twice.
-func (a *app) newSlide(s slide) slide {
-	s.ID = fmt.Sprintf("s%d", a.nextID)
+func (a *app) newSlide(title, section, text string, kind slideKind, size float64) slide {
+	s := slide{
+		ID:       fmt.Sprintf("s%d", a.nextID),
+		Title:    title,
+		Section:  section,
+		Text:     text,
+		Kind:     kind,
+		TextSize: size,
+	}
 	a.nextID++
 	return s
 }
 
-// addSong appends every section of the song and moves the monitor to its
-// first slide. The stage is untouched until the operator takes it.
+// songByID looks in the active library, which the editor can change.
+func (a *app) songByID(id string) (song, bool) {
+	return findSong(a.songs, id)
+}
+
+// addSong appends every slide of the song, part by part, and moves the
+// monitor to its first slide. The stage is untouched until the operator
+// takes it.
 func (a *app) addSong(id string) {
-	s, ok := songByID(id)
+	s, ok := a.songByID(id)
 	if !ok {
 		return
 	}
+	if a.addSongParts(s) > 0 {
+		a.changed()
+	}
+}
+
+// addSongParts appends all of one song's slides and moves the monitor to the
+// first new one. It returns how many slides it added and leaves the preview
+// alone when the song has no text.
+func (a *app) addSongParts(s song) int {
 	first := len(a.deck)
-	for _, section := range s.Sections {
-		a.deck = append(a.deck, a.newSlide(slide{
-			Title:   s.Title,
-			Section: section.Label,
-			Text:    section.Text,
-			Kind:    slideSong,
-		}))
+	n := 0
+	for _, part := range s.Parts {
+		n += a.addPartSlides(s, part)
+	}
+	if n > 0 {
+		a.preview = first
+	}
+	return n
+}
+
+// addPartSlides appends the non-blank slides of one part, stamped with the
+// song's size, and returns how many it added.
+func (a *app) addPartSlides(s song, part songPart) int {
+	n := 0
+	for _, text := range part.Slides {
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		a.deck = append(a.deck, a.newSlide(s.Title, part.Label, text, slideSong, s.textSize()))
+		n++
+	}
+	return n
+}
+
+// addPart appends one named part of a song to the run of show, so a chorus
+// can come back without adding the whole song again.
+func (a *app) addPart(id string, part int) bool {
+	s, ok := a.songByID(id)
+	if !ok || part < 0 || part >= len(s.Parts) {
+		return false
+	}
+	first := len(a.deck)
+	if a.addPartSlides(s, s.Parts[part]) == 0 {
+		return false
 	}
 	a.preview = first
 	a.changed()
+	return true
 }
 
 // addVerse appends one scripture slide and moves the monitor to it.
@@ -82,12 +126,7 @@ func (a *app) addVerse(ref string) {
 	if !ok {
 		return
 	}
-	a.deck = append(a.deck, a.newSlide(slide{
-		Title:   v.Ref,
-		Section: "Scripture",
-		Text:    v.Text,
-		Kind:    slideVerse,
-	}))
+	a.deck = append(a.deck, a.newSlide(v.Ref, "Scripture", v.Text, slideVerse, defaultTextSize))
 	a.preview = len(a.deck) - 1
 	a.changed()
 }
@@ -124,6 +163,72 @@ func (a *app) takeSlide() {
 	}
 	a.stage = a.preview
 	a.changed()
+}
+
+// takeSlideAt sends one row to the stage and pulls the monitor to it: the
+// run of show's own Go Live, which acts on the row it sits in rather than on
+// whatever the monitor happens to be on.
+func (a *app) takeSlideAt(i int) {
+	if i < 0 || i >= len(a.deck) || i == a.stage {
+		return
+	}
+	a.preview = i
+	a.stage = i
+	a.changed()
+}
+
+// moveSlideAt moves one row by delta places, the row's own Up/Down. The
+// monitor follows the row; the slide on air stays on air wherever it lands.
+func (a *app) moveSlideAt(i, delta int) {
+	to := i + delta
+	if i < 0 || i >= len(a.deck) || to < 0 || to >= len(a.deck) {
+		return
+	}
+	a.reorderSlides([]int{i}, to)
+}
+
+// deckDrag is the value a tile's picture drags: the slide's row in the deck.
+type deckDrag struct{ from int }
+
+// deckDrop is a drag the console saw land: the row it came from, the tile it
+// landed on, and which side of that tile. The console applies it after the
+// frame, because ui.Drop delivers while the view builds.
+type deckDrop struct {
+	from  int
+	at    int
+	after bool
+}
+
+// dropSlide moves a dragged tile where it landed. Dropping on the gap it came
+// from, or on the far side of its own tile, changes nothing.
+func (a *app) dropSlide(d deckDrop) {
+	if d.from < 0 || d.from >= len(a.deck) || d.at < 0 || d.at >= len(a.deck) {
+		return
+	}
+	// The slot the slide goes in, in the deck as it is now, then as
+	// reorderSlides counts it: in the deck without the slide itself.
+	slot := d.at
+	if d.after {
+		slot++
+	}
+	to := slot
+	if d.from < slot {
+		to--
+	}
+	if to == d.from {
+		return
+	}
+	a.reorderSlides([]int{d.from}, to)
+}
+
+// removeSlideAt drops one row, the row's own Remove, and keeps the stage on
+// the slide it was showing.
+func (a *app) removeSlideAt(i int) {
+	if i < 0 || i >= len(a.deck) {
+		return
+	}
+	a.preview = i
+	a.removeSlide()
 }
 
 // nextStage advances the stage and pulls the monitor along, so the console
@@ -173,11 +278,7 @@ func (a *app) removeSlide() {
 // moveSlide swaps the monitor row with its neighbour. The slide on air stays
 // on air: the reorder carries the stage along with the row it moves.
 func (a *app) moveSlide(delta int) {
-	p := a.preview + delta
-	if a.preview < 0 || a.preview >= len(a.deck) || p < 0 || p >= len(a.deck) {
-		return
-	}
-	a.reorderSlides([]int{a.preview}, p)
+	a.moveSlideAt(a.preview, delta)
 }
 
 // reorderSlides moves the rows chosen to before the row that is at to now,

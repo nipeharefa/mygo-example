@@ -2,20 +2,33 @@ package main
 
 // The song and scripture library. Every text here is public domain: the
 // hymns are traditional and the verses are King James Version (1611).
-// Text fields carry one line per line break so a slide can render them
+// A slide's text carries one line per line break so a slide can render it
 // as written.
 
-type songSection struct {
-	Label string
-	Text  string
+const (
+	// defaultTextSize is the body size at the 1280x720 design, in stage
+	// pixels. A song may choose its own, and every canvas scales it by
+	// width/1280.
+	defaultTextSize = 40.0
+	minTextSize     = 24.0
+	maxTextSize     = 72.0
+)
+
+// songPart is one labeled part of a song. It spans one or more slides, so a
+// verse too long for one screen keeps a single name on every screen it
+// covers.
+type songPart struct {
+	Label  string   `json:"label"`
+	Slides []string `json:"slides"`
 }
 
 type song struct {
-	ID       string
-	Title    string
-	Author   string
-	Key      string
-	Sections []songSection
+	ID       string     `json:"id"`
+	Title    string     `json:"title"`
+	Author   string     `json:"author"`
+	Key      string     `json:"key"`
+	TextSize float64    `json:"textSize"` // stage px at 1280x720
+	Parts    []songPart `json:"parts"`
 }
 
 type verse struct {
@@ -28,33 +41,67 @@ type versePack struct {
 	Verses []verse
 }
 
-var songs = []song{
+// textSize is the size the output should draw: a zero value from an older
+// file means the default, and anything out of range is pulled back in.
+func (s song) textSize() float64 {
+	return clampTextSize(s.TextSize)
+}
+
+// clampTextSize makes any stored size usable by the slider and the renderer.
+func clampTextSize(size float64) float64 {
+	if size <= 0 {
+		return defaultTextSize
+	}
+	if size < minTextSize {
+		return minTextSize
+	}
+	if size > maxTextSize {
+		return maxTextSize
+	}
+	return size
+}
+
+func (s song) slideCount() int {
+	n := 0
+	for _, part := range s.Parts {
+		n += len(part.Slides)
+	}
+	return n
+}
+
+var builtinSongs = []song{
 	{
 		ID:     "amazing-grace",
 		Title:  "Amazing Grace",
 		Author: "John Newton",
 		Key:    "G",
-		Sections: []songSection{
+		Parts: []songPart{
 			{
 				Label: "Verse 1",
-				Text: "Amazing grace! how sweet the sound\n" +
-					"That saved a wretch like me!\n" +
-					"I once was lost, but now am found;\n" +
-					"Was blind, but now I see.",
+				Slides: []string{
+					"Amazing grace! how sweet the sound\n" +
+						"That saved a wretch like me!\n" +
+						"I once was lost, but now am found;\n" +
+						"Was blind, but now I see.",
+				},
 			},
 			{
 				Label: "Verse 2",
-				Text: "'Twas grace that taught my heart to fear,\n" +
-					"And grace my fears relieved;\n" +
-					"How precious did that grace appear\n" +
-					"The hour I first believed!",
+				Slides: []string{
+					"'Twas grace that taught my heart to fear,\n" +
+						"And grace my fears relieved;\n" +
+						"How precious did that grace appear\n" +
+						"The hour I first believed!",
+				},
 			},
 			{
 				Label: "Verse 3",
-				Text: "Through many dangers, toils, and snares,\n" +
-					"I have already come;\n" +
-					"'Tis grace hath brought me safe thus far,\n" +
-					"And grace will lead me home.",
+				Slides: []string{
+					"Through many dangers, toils, and snares,\n" +
+						"I have already come;\n" +
+						"'Tis grace hath brought me safe thus far,\n" +
+						"And grace will lead me home.",
+				},
 			},
 		},
 	},
@@ -63,20 +110,24 @@ var songs = []song{
 		Title:  "Holy, Holy, Holy",
 		Author: "Reginald Heber",
 		Key:    "D",
-		Sections: []songSection{
+		Parts: []songPart{
 			{
 				Label: "Verse 1",
-				Text: "Holy, holy, holy! Lord God Almighty!\n" +
-					"Early in the morning our song shall rise to Thee;\n" +
-					"Holy, holy, holy! Merciful and mighty!\n" +
-					"God in three Persons, blessed Trinity!",
+				Slides: []string{
+					"Holy, holy, holy! Lord God Almighty!\n" +
+						"Early in the morning our song shall rise to Thee;\n" +
+						"Holy, holy, holy! Merciful and mighty!\n" +
+						"God in three Persons, blessed Trinity!",
+				},
 			},
 			{
 				Label: "Verse 2",
-				Text: "Holy, holy, holy! All the saints adore Thee,\n" +
-					"Casting down their golden crowns around the glassy sea;\n" +
-					"Cherubim and seraphim falling down before Thee,\n" +
-					"Which wert, and art, and evermore shalt be.",
+				Slides: []string{
+					"Holy, holy, holy! All the saints adore Thee,\n" +
+						"Casting down their golden crowns around the glassy sea;\n" +
+						"Cherubim and seraphim falling down before Thee,\n" +
+						"Which wert, and art, and evermore shalt be.",
+				},
 			},
 		},
 	},
@@ -85,20 +136,24 @@ var songs = []song{
 		Title:  "Be Thou My Vision",
 		Author: "Attr. Dallán Forgaill, trans. Mary Byrne",
 		Key:    "Eb",
-		Sections: []songSection{
+		Parts: []songPart{
 			{
 				Label: "Verse 1",
-				Text: "Be Thou my Vision, O Lord of my heart;\n" +
-					"Naught be all else to me, save that Thou art;\n" +
-					"Thou my best thought, by day or by night,\n" +
-					"Waking or sleeping, Thy presence my light.",
+				Slides: []string{
+					"Be Thou my Vision, O Lord of my heart;\n" +
+						"Naught be all else to me, save that Thou art;\n" +
+						"Thou my best thought, by day or by night,\n" +
+						"Waking or sleeping, Thy presence my light.",
+				},
 			},
 			{
 				Label: "Verse 2",
-				Text: "Be Thou my Wisdom, and Thou my true Word;\n" +
-					"I ever with Thee and Thou with me, Lord;\n" +
-					"Thou my great Father, I Thy true son;\n" +
-					"Thou in me dwelling, and I with Thee one.",
+				Slides: []string{
+					"Be Thou my Wisdom, and Thou my true Word;\n" +
+						"I ever with Thee and Thou with me, Lord;\n" +
+						"Thou my great Father, I Thy true son;\n" +
+						"Thou in me dwelling, and I with Thee one.",
+				},
 			},
 		},
 	},
@@ -107,16 +162,19 @@ var songs = []song{
 		Title:  "All Creatures of Our God and King",
 		Author: "St. Francis of Assisi, trans. William H. Draper",
 		Key:    "D",
-		Sections: []songSection{
+		Parts: []songPart{
 			{
+				// One part over two slides: the label stays Verse 1 on both.
 				Label: "Verse 1",
-				Text: "All creatures of our God and King,\n" +
-					"Lift up your voice and with us sing,\n" +
-					"Alleluia! Alleluia!\n" +
-					"Thou burning sun with golden beam,\n" +
+				Slides: []string{
+					"All creatures of our God and King,\n" +
+						"Lift up your voice and with us sing,\n" +
+						"Alleluia! Alleluia!\n" +
+						"Thou burning sun with golden beam,",
 					"Thou silver moon with softer gleam,\n" +
-					"O praise Him, O praise Him!\n" +
-					"Alleluia! Alleluia! Alleluia!",
+						"O praise Him, O praise Him!\n" +
+						"Alleluia! Alleluia! Alleluia!",
+				},
 			},
 		},
 	},
@@ -125,30 +183,34 @@ var songs = []song{
 		Title:  "A Mighty Fortress Is Our God",
 		Author: "Martin Luther, trans. Frederic H. Hedge",
 		Key:    "C",
-		Sections: []songSection{
+		Parts: []songPart{
 			{
 				Label: "Verse 1",
-				Text: "A mighty fortress is our God,\n" +
-					"A bulwark never failing;\n" +
-					"Our helper He, amid the flood\n" +
-					"Of mortal ills prevailing.\n" +
-					"For still our ancient foe\n" +
-					"Doth seek to work us woe;\n" +
-					"His craft and power are great,\n" +
-					"And armed with cruel hate,\n" +
-					"On earth is not his equal.",
+				Slides: []string{
+					"A mighty fortress is our God,\n" +
+						"A bulwark never failing;\n" +
+						"Our helper He, amid the flood\n" +
+						"Of mortal ills prevailing.\n" +
+						"For still our ancient foe\n" +
+						"Doth seek to work us woe;\n" +
+						"His craft and power are great,\n" +
+						"And armed with cruel hate,\n" +
+						"On earth is not his equal.",
+				},
 			},
 			{
 				Label: "Verse 2",
-				Text: "Did we in our own strength confide,\n" +
-					"Our striving would be losing;\n" +
-					"Were not the right Man on our side,\n" +
-					"The Man of God's own choosing.\n" +
-					"Dost ask who that may be?\n" +
-					"Christ Jesus, it is He;\n" +
-					"Lord Sabaoth His name,\n" +
-					"From age to age the same,\n" +
-					"And He must win the battle.",
+				Slides: []string{
+					"Did we in our own strength confide,\n" +
+						"Our striving would be losing;\n" +
+						"Were not the right Man on our side,\n" +
+						"The Man of God's own choosing.\n" +
+						"Dost ask who that may be?\n" +
+						"Christ Jesus, it is He;\n" +
+						"Lord Sabaoth His name,\n" +
+						"From age to age the same,\n" +
+						"And He must win the battle.",
+				},
 			},
 		},
 	},
@@ -193,8 +255,10 @@ var packs = []versePack{
 	},
 }
 
-func songByID(id string) (song, bool) {
-	for _, s := range songs {
+// findSong looks a song up in any library, not just the built-ins: the
+// editor works on the active one.
+func findSong(list []song, id string) (song, bool) {
+	for _, s := range list {
 		if s.ID == id {
 			return s, true
 		}

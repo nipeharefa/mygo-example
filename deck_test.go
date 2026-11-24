@@ -2,16 +2,22 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
+// deckApp gives the model tests the built-in library without a window.
+func deckApp() *app {
+	return &app{songs: cloneSongs(builtinSongs)}
+}
+
 func TestDataIsReachable(t *testing.T) {
-	if len(songs) < 4 {
-		t.Fatalf("songs = %d, want at least 4", len(songs))
+	if len(builtinSongs) < 4 {
+		t.Fatalf("builtinSongs = %d, want at least 4", len(builtinSongs))
 	}
 	seenSongs := map[string]bool{}
-	sections := 0
-	for _, s := range songs {
+	slides := 0
+	for _, s := range builtinSongs {
 		if s.ID == "" || s.Title == "" {
 			t.Errorf("song missing id or title: %+v", s)
 		}
@@ -19,24 +25,32 @@ func TestDataIsReachable(t *testing.T) {
 			t.Errorf("duplicate song id %q", s.ID)
 		}
 		seenSongs[s.ID] = true
-		if len(s.Sections) == 0 {
-			t.Errorf("song %q has no sections", s.ID)
+		if len(s.Parts) == 0 {
+			t.Errorf("song %q has no parts", s.ID)
 		}
-		for _, sec := range s.Sections {
-			if sec.Label == "" || sec.Text == "" {
-				t.Errorf("song %q has an empty section", s.ID)
+		for _, part := range s.Parts {
+			if part.Label == "" {
+				t.Errorf("song %q has an empty part label", s.ID)
 			}
-			sections++
+			if len(part.Slides) == 0 {
+				t.Errorf("song %q part %q has no slides", s.ID, part.Label)
+			}
+			for _, text := range part.Slides {
+				if strings.TrimSpace(text) == "" {
+					t.Errorf("song %q part %q has a blank slide", s.ID, part.Label)
+				}
+				slides++
+			}
 		}
 	}
-	if sections < 8 {
-		t.Fatalf("sections = %d, want at least 8", sections)
+	if slides < 8 {
+		t.Fatalf("slides = %d, want at least 8", slides)
 	}
-	if _, ok := songByID(songs[0].ID); !ok {
-		t.Errorf("songByID(%q) not found", songs[0].ID)
+	if _, ok := findSong(builtinSongs, builtinSongs[0].ID); !ok {
+		t.Errorf("findSong(%q) not found", builtinSongs[0].ID)
 	}
-	if _, ok := songByID("no-such-song"); ok {
-		t.Error("songByID accepted an unknown id")
+	if _, ok := findSong(builtinSongs, "no-such-song"); ok {
+		t.Error("findSong accepted an unknown id")
 	}
 
 	if len(packs) < 3 {
@@ -74,7 +88,7 @@ func TestDataIsReachable(t *testing.T) {
 }
 
 func TestAddSongAppendsSections(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	if len(a.deck) != 3 {
 		t.Fatalf("deck = %d slides, want 3", len(a.deck))
@@ -103,7 +117,7 @@ func TestAddSongAppendsSections(t *testing.T) {
 }
 
 func TestAddSongMovesOnlyTheMonitor(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	a.nextStage()
 	onAir := a.deck[a.stage].ID
@@ -121,7 +135,7 @@ func TestAddSongMovesOnlyTheMonitor(t *testing.T) {
 }
 
 func TestAddSongTwiceKeepsIDsUnique(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	a.addSong("amazing-grace")
 	seen := map[string]bool{}
@@ -137,7 +151,7 @@ func TestAddSongTwiceKeepsIDsUnique(t *testing.T) {
 }
 
 func TestAddSongIgnoresUnknownID(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("no-such-song")
 	if len(a.deck) != 0 {
 		t.Fatalf("deck = %d, want empty", len(a.deck))
@@ -145,7 +159,7 @@ func TestAddSongIgnoresUnknownID(t *testing.T) {
 }
 
 func TestAddVerseAppendsOneSlide(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addVerse("Psalm 23:1")
 	if len(a.deck) != 1 {
 		t.Fatalf("deck = %d, want 1", len(a.deck))
@@ -157,16 +171,13 @@ func TestAddVerseAppendsOneSlide(t *testing.T) {
 	if s.caption() != "Psalm 23:1" {
 		t.Errorf("caption = %q", s.caption())
 	}
-	if s.eyebrow() != "SCRIPTURE" {
-		t.Errorf("eyebrow = %q", s.eyebrow())
-	}
 	if a.preview != 0 {
 		t.Errorf("preview = %d, want the new slide", a.preview)
 	}
 }
 
 func TestMonitorNavigationClamps(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	a.prevSlide()
 	if a.preview != 0 {
@@ -187,7 +198,7 @@ func TestMonitorNavigationClamps(t *testing.T) {
 }
 
 func TestSelectSlideClamps(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	a.selectSlide(1)
 	if a.preview != 1 {
@@ -204,7 +215,7 @@ func TestSelectSlideClamps(t *testing.T) {
 }
 
 func TestTakeSlide(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	a.selectSlide(2)
 	a.takeSlide()
@@ -222,7 +233,7 @@ func TestTakeSlide(t *testing.T) {
 }
 
 func TestTakeSlideWithoutADeck(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.takeSlide()
 	if a.stage != 0 || a.preview != 0 {
 		t.Fatalf("empty take moved to stage=%d preview=%d", a.stage, a.preview)
@@ -230,7 +241,7 @@ func TestTakeSlideWithoutADeck(t *testing.T) {
 }
 
 func TestNextStagePullsTheMonitor(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	a.nextStage()
 	if a.stage != 1 || a.preview != 1 {
@@ -253,7 +264,7 @@ func TestNextStagePullsTheMonitor(t *testing.T) {
 }
 
 func TestRemoveMonitorRowKeepsStage(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	onAir := a.deck[0].ID
 	a.selectSlide(2)
@@ -267,7 +278,7 @@ func TestRemoveMonitorRowKeepsStage(t *testing.T) {
 }
 
 func TestRemoveStageRowAdvancesStage(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	a.selectSlide(1)
 	a.takeSlide()
@@ -281,7 +292,7 @@ func TestRemoveStageRowAdvancesStage(t *testing.T) {
 }
 
 func TestRemoveStageRowAtTheEnd(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	a.selectSlide(2)
 	a.takeSlide()
@@ -292,7 +303,7 @@ func TestRemoveStageRowAtTheEnd(t *testing.T) {
 }
 
 func TestRemoveAboveStageShiftsStage(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	a.selectSlide(2)
 	a.takeSlide()
@@ -307,7 +318,7 @@ func TestRemoveAboveStageShiftsStage(t *testing.T) {
 }
 
 func TestRemoveToEmpty(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addVerse("Psalm 23:1")
 	a.removeSlide()
 	if len(a.deck) != 0 || a.preview != 0 || a.stage != 0 {
@@ -320,7 +331,7 @@ func TestRemoveToEmpty(t *testing.T) {
 }
 
 func TestMoveSlideKeepsTheStageContent(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	a.selectSlide(1)
 	a.takeSlide()
@@ -340,7 +351,7 @@ func TestMoveSlideKeepsTheStageContent(t *testing.T) {
 }
 
 func TestMoveSlideMovesTheStageWithIt(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	a.selectSlide(1)
 	a.takeSlide()
@@ -354,7 +365,7 @@ func TestMoveSlideMovesTheStageWithIt(t *testing.T) {
 }
 
 func TestMoveSlideStaysInBounds(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	last := a.deck[0].ID
 	a.selectSlide(0)
@@ -370,7 +381,7 @@ func TestMoveSlideStaysInBounds(t *testing.T) {
 }
 
 func TestStageAndPreviewSlides(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	if _, ok := a.stageSlide(); ok {
 		t.Fatal("empty deck reported a stage slide")
 	}
@@ -390,7 +401,7 @@ func TestStageAndPreviewSlides(t *testing.T) {
 }
 
 func TestUpcomingSlide(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.addSong("amazing-grace")
 	up, ok := a.upcomingSlide()
 	if !ok || up.Section != "Verse 2" {
@@ -404,7 +415,7 @@ func TestUpcomingSlide(t *testing.T) {
 }
 
 func TestToggleBlackout(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.toggleBlackout()
 	if !a.blackout {
 		t.Fatal("blackout not enabled")
@@ -416,7 +427,7 @@ func TestToggleBlackout(t *testing.T) {
 }
 
 func TestChangedWithoutWindows(t *testing.T) {
-	a := &app{}
+	a := deckApp()
 	a.changed()
 }
 
@@ -542,5 +553,113 @@ func TestMoveSlideUsesTheReorder(t *testing.T) {
 	}
 	if a.deck[a.preview].ID == "" || a.preview != 3 {
 		t.Fatalf("preview = %d for %s, want the moved row", a.preview, second)
+	}
+}
+
+func TestAddSongSnapshotsTextSize(t *testing.T) {
+	a := deckApp()
+	a.addSong("amazing-grace")
+	for i, s := range a.deck {
+		if s.TextSize != defaultTextSize {
+			t.Errorf("slide %d size = %v, want %v", i, s.TextSize, defaultTextSize)
+		}
+	}
+}
+
+func TestAddSongAllCreaturesHasTwoSlides(t *testing.T) {
+	a := deckApp()
+	a.addSong("all-creatures")
+	if len(a.deck) != 2 {
+		t.Fatalf("deck = %d slides, want 2", len(a.deck))
+	}
+	for i, s := range a.deck {
+		if s.Section != "Verse 1" {
+			t.Errorf("slide %d section = %q, want Verse 1", i, s.Section)
+		}
+	}
+	if a.preview != 0 {
+		t.Errorf("preview = %d, want 0", a.preview)
+	}
+}
+
+func TestAddSongSkipsBlankSlides(t *testing.T) {
+	a := deckApp()
+	draft := song{
+		Title: "Draft",
+		Parts: []songPart{{Label: "Verse 1", Slides: []string{"", "   ", "real text"}}},
+	}
+	if n := a.addSongParts(draft); n != 1 {
+		t.Fatalf("added = %d, want 1", n)
+	}
+	if len(a.deck) != 1 || a.deck[0].Text != "real text" {
+		t.Fatalf("deck = %+v", a.deck)
+	}
+	if a.preview != 0 {
+		t.Errorf("preview = %d, want 0", a.preview)
+	}
+}
+
+func TestAddSongWithNoTextLeavesDeckAndPreview(t *testing.T) {
+	a := deckApp()
+	a.addSong("amazing-grace")
+	a.nextStage()
+	before := len(a.deck)
+	draft := song{Parts: []songPart{{Label: "Verse 1", Slides: []string{" ", ""}}}}
+	if n := a.addSongParts(draft); n != 0 {
+		t.Fatalf("added = %d, want 0", n)
+	}
+	if len(a.deck) != before || a.preview != 1 {
+		t.Errorf("deck = %d, preview = %d; want %d, 1", len(a.deck), a.preview, before)
+	}
+}
+
+func TestAddPartAppendsOnePart(t *testing.T) {
+	a := deckApp()
+	a.addSong("amazing-grace")
+	a.nextStage()
+	onAir := a.deck[a.stage].ID
+
+	if !a.addPart("amazing-grace", 1) {
+		t.Fatal("addPart returned false")
+	}
+	if len(a.deck) != 4 {
+		t.Fatalf("deck = %d, want 4", len(a.deck))
+	}
+	if a.deck[3].Section != "Verse 2" {
+		t.Errorf("section = %q, want Verse 2", a.deck[3].Section)
+	}
+	if a.preview != 3 {
+		t.Errorf("preview = %d, want 3", a.preview)
+	}
+	if a.stage != 1 || a.deck[a.stage].ID != onAir {
+		t.Errorf("addPart moved the stage")
+	}
+}
+
+func TestAddPartIgnoresUnknown(t *testing.T) {
+	a := deckApp()
+	if a.addPart("no-such-song", 0) {
+		t.Error("accepted an unknown song")
+	}
+	if a.addPart("amazing-grace", 9) {
+		t.Error("accepted an out-of-range part")
+	}
+	if a.addPart("amazing-grace", -1) {
+		t.Error("accepted a negative part")
+	}
+	if len(a.deck) != 0 {
+		t.Errorf("deck = %d, want 0", len(a.deck))
+	}
+}
+
+func TestAddPartSkipsBlankSlides(t *testing.T) {
+	a := deckApp()
+	draft := song{Title: "Draft"}
+	part := songPart{Label: "Chorus", Slides: []string{"", "line"}}
+	if n := a.addPartSlides(draft, part); n != 1 {
+		t.Fatalf("added = %d, want 1", n)
+	}
+	if len(a.deck) != 1 || a.deck[0].Section != "Chorus" {
+		t.Fatalf("deck = %+v", a.deck)
 	}
 }

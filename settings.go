@@ -22,6 +22,14 @@ type settings struct {
 	// NDIResolution is the size the feed publishes at: 0 is 720p, the
 	// default, and 1 is 1080p.
 	NDIResolution int `json:"ndiResolution"`
+	// UpdateChannel is 1 when Check for Updates offers beta releases as well
+	// as the newest stable one. 0 asks for stable only, which is the default:
+	// a missing key reads as 0.
+	UpdateChannel int `json:"updateChannel"`
+	// LibraryFolder is where library.json lives when it is not the app's
+	// own folder, as an iCloud Drive or Dropbox folder two machines share.
+	// Empty means the app data directory.
+	LibraryFolder string `json:"libraryFolder,omitempty"`
 }
 
 // legacySettings is the file written before the display key was named
@@ -58,17 +66,14 @@ func readSettings(path string) settings {
 	return s
 }
 
-// writeSettings stores the preferences, creating the app data directory on
-// first use.
+// writeSettings stores the preferences in one step, creating the app data
+// directory on first use.
 func writeSettings(path string, s settings) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return writeFileAtomic(path, append(data, '\n'))
 }
 
 // settingsPath is where the preferences live, or "" before the app is ready
@@ -87,6 +92,8 @@ func (a *app) loadSettings() {
 	a.stageDisplay = s.Display
 	a.ndiOn = s.NDI
 	a.ndiResolution = s.NDIResolution
+	a.updateChannel = s.UpdateChannel == updateChannelBeta
+	a.libraryFolder = s.LibraryFolder
 	// Only drop the saved display when the list is known: startup fills it
 	// before loading, while a headless test may leave it empty.
 	if len(a.displays) > 0 && a.stageDisplay != 0 && !a.hasDisplay(a.stageDisplay) {
@@ -101,7 +108,13 @@ func (a *app) saveSettings() {
 	if path == "" {
 		return
 	}
-	err := writeSettings(path, settings{Display: a.stageDisplay, NDI: a.ndiOn, NDIResolution: a.ndiResolution})
+	err := writeSettings(path, settings{
+		Display:       a.stageDisplay,
+		NDI:           a.ndiOn,
+		NDIResolution: a.ndiResolution,
+		UpdateChannel: updateChannelOf(a.updateChannel),
+		LibraryFolder: a.libraryFolder,
+	})
 	if err != nil {
 		log.Printf("mygo-demo: save settings: %v", err)
 	}
@@ -151,6 +164,7 @@ func stageDisplayFound(displays []mygo.Display, id int64) (mygo.Display, bool) {
 // showSettings brings the Settings page of the console forward.
 func (a *app) showSettings() {
 	a.page = pageSettings
+	a.menuOpen = false
 	if a.win != nil {
 		a.win.Focus()
 	}
@@ -160,67 +174,191 @@ func (a *app) showSettings() {
 // showConsole leaves the Settings page for the run of show.
 func (a *app) showConsole() {
 	a.page = pageConsole
+	a.restoreWaiting = nil
+	a.folderWaiting = nil
+	a.revisionWaiting = 0
 	a.changed()
 }
 
 // settingsBody is the Settings page of the console: where the stage opens,
 // whether NDI publishes and how that stream is doing, and what is saved.
+// Each group is a raised card in one reading column, so a preference and
+// its explanation stay together on a wide window.
 func (a *app) settingsBody(c *ui.Context) {
 	t := c.Theme()
-	ui.Scroll(c).Fill().Padding(24, 28).Children(func() {
-		ui.Column(c).Gap(16).MaxWidth(c.Theme().Rem(72)).Children(func() {
-			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-				ui.Column(c).Gap(2).Grow(1).Children(func() {
-					ui.Text(c, "Settings").FontSize(20).Bold().SingleLine()
-					ui.Text(c, "Preferences for the stage window and the NDI stream.").FontSize(11).TextColor(t.TextMuted).SingleLine()
+	ui.Scroll(c).Fill().Background(t.Background).Children(func() {
+		ui.Column(c).Grow(1).AlignItems(ui.Center).Padding(28, 0, 40).Children(func() {
+			ui.Column(c).Gap(18).Width(680).Children(func() {
+				ui.Row(c).Gap(12).AlignItems(ui.Center).PaddingY(2).Children(func() {
+					ui.Column(c).Gap(3).Grow(1).Children(func() {
+						ui.Text(c, "Settings").FontSize(24).FontWeight(700).SingleLine()
+						ui.Text(c, "Preferences for the stage window and the NDI stream.").
+							FontSize(textBody).TextColor(t.TextMuted).SingleLine()
+					})
+					ui.Button(c, "Back to console").Label("Back to console").OnClick(a.showConsole)
 				})
-				ui.Button(c, "Back to console").Label("Back to console").OnClick(a.showConsole)
-			})
 
-			settingsHeading(c, "Stage output")
-			ui.Text(c, "A display opens the stage fullscreen there. A window stays on this screen; drag it to a projector and press Present.").
-				FontSize(11).TextColor(t.TextMuted)
-			ui.Radio(c, &a.stageDisplay, int64(0), "Windowed on this screen").OnChange(a.stageDisplayChanged)
-			for _, d := range a.displays {
-				ui.Radio(c, &a.stageDisplay, d.ID, displayOption(d)).OnChange(a.stageDisplayChanged)
-			}
-			if len(a.displays) == 0 {
-				ui.Text(c, "No displays reported.").FontSize(11).TextColor(t.TextMuted).SingleLine()
-			}
-
-			ui.Divider(c)
-			settingsHeading(c, "NDI")
-			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-				ui.Column(c).Gap(2).Grow(1).Children(func() {
-					ui.Text(c, "Publish the stage over NDI").FontSize(12).FontWeight(600).SingleLine()
-					ui.Text(c, "The feed is the slide alone, up to 1920 × 1080.").FontSize(10).TextColor(t.TextMuted)
+				// Stage output
+				settingsCard(c, "Stage output", "Where the live window opens.", func() {
+					ui.Text(c, "A display opens the stage fullscreen there. A window stays on this screen; drag it to a projector and press Present.").
+						FontSize(textBody).TextColor(t.TextMuted)
+					ui.Radio(c, &a.stageDisplay, int64(0), "Windowed on this screen").OnChange(a.stageDisplayChanged)
+					for _, d := range a.displays {
+						ui.Radio(c, &a.stageDisplay, d.ID, displayOption(d)).OnChange(a.stageDisplayChanged)
+					}
+					if len(a.displays) == 0 {
+						ui.Text(c, "No displays reported.").FontSize(textSmall).TextColor(t.TextMuted).SingleLine()
+					}
 				})
-				ui.Switch(c, &a.ndiOn).Label("Publish the stage over NDI").
-					OnChange(a.ndiToggled).Disabled(!ndiSupported())
-			})
-			status, color := a.ndiStatus(t)
-			ui.Text(c, status).FontSize(11).TextColor(color)
 
-			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-				ui.Column(c).Gap(2).Grow(1).Children(func() {
-					ui.Text(c, "Stage output size").FontSize(12).FontWeight(600).SingleLine()
-					ui.Text(c, "The feed draws the slide itself, so it does not depend on the stage window or on a second monitor.").
-						FontSize(10).TextColor(t.TextMuted)
+				// NDI
+				settingsCard(c, "NDI", "The feed the video mixer receives.", func() {
+					ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+						ui.Column(c).Gap(3).Grow(1).Children(func() {
+							ui.Text(c, "Publish the stage over NDI").FontSize(textTitle).FontWeight(600).SingleLine()
+							ui.Text(c, "The feed is the slide alone, up to 1920 × 1080.").FontSize(textSmall).TextColor(t.TextMuted)
+						})
+						ui.Switch(c, &a.ndiOn).Label("Publish the stage over NDI").
+							OnChange(a.ndiToggled).Disabled(!ndiSupported())
+					})
+					status, color := a.ndiStatus(t)
+					ui.Row(c).Gap(7).AlignItems(ui.Center).Children(func() {
+						ui.Box(c).Size(6, 6).Radius(999).Background(color)
+						ui.Text(c, status).FontSize(textSmall).TextColor(color).SingleLine()
+					})
+					ui.Divider(c)
+					ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+						ui.Column(c).Gap(3).Grow(1).Children(func() {
+							ui.Text(c, "Stage output size").FontSize(textTitle).FontWeight(600).SingleLine()
+							ui.Text(c, "The feed draws the slide itself, so it does not depend on the stage window or on a second monitor.").
+								FontSize(textSmall).TextColor(t.TextMuted)
+						})
+						ui.Radio(c, &a.ndiResolution, ndiResolution720, "720p").OnChange(a.ndiResolutionChanged).Label("Stage output size: 720p")
+						ui.Radio(c, &a.ndiResolution, ndiResolution1080, "1080p").OnChange(a.ndiResolutionChanged).Label("Stage output size: 1080p")
+					})
+					a.ndiStatsSection(c)
 				})
-				ui.Radio(c, &a.ndiResolution, ndiResolution720, "720p").OnChange(a.ndiResolutionChanged).Label("Stage output size: 720p")
-				ui.Radio(c, &a.ndiResolution, ndiResolution1080, "1080p").OnChange(a.ndiResolutionChanged).Label("Stage output size: 1080p")
-			})
-			a.ndiStatsSection(c)
 
-			ui.Divider(c)
-			settingsHeading(c, "Data")
-			ui.Text(c, "The run of show is not saved. The display and NDI preferences are saved in the app data directory.").
-				FontSize(11).TextColor(t.TextMuted)
-			if a.settingsDir == "" {
-				ui.Text(c, "Preferences are not saved in this session.").FontSize(11).TextColor(t.TextMuted).SingleLine()
-			}
-			ui.Text(c, "The hymns and the King James verses are public domain.").FontSize(11).TextColor(t.TextMuted)
+				// Songs folder
+				settingsCard(c, "Songs folder", "Where the library lives, and what syncs it.", func() {
+					ui.Text(c, "A folder your cloud app already syncs, such as iCloud Drive or Dropbox, moves the songs between machines. The run of show and these preferences stay with this machine.").
+						FontSize(textBody).TextColor(t.TextMuted)
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
+						label := "Choose a folder…"
+						if a.libraryFolder != "" {
+							label = "Change folder…"
+						}
+						ui.Button(c, label).Label("Choose the songs folder").OnClick(a.chooseSongsFolder)
+						if a.libraryFolder != "" {
+							ui.Button(c, "Use the app's folder").OnClick(a.useAppFolder)
+							ui.Button(c, "Reload").Label("Reload the songs folder").OnClick(a.reloadLibrary)
+						}
+					})
+					dir := a.libraryDir()
+					shown := "the app data directory"
+					if dir != "" {
+						shown = dir
+					}
+					ui.Text(c, "Songs file: "+filepath.Join(shown, "library.json")).
+						FontSize(textSmall).TextColor(t.TextMuted).SingleLine()
+					ui.Text(c, "Edit on one machine at a time. The app checks the file before it writes and asks if another machine changed it.").
+						FontSize(textSmall).TextColor(t.TextMuted)
+					if a.libraryNote != "" {
+						color := t.TextMuted
+						if a.libraryBlocked {
+							color = t.Danger
+						}
+						ui.Text(c, a.libraryNote).FontSize(textSmall).TextColor(color)
+					}
+					if a.folderNote != "" {
+						color := t.TextMuted
+						if a.folderNoteErr {
+							color = t.Danger
+						}
+						ui.Text(c, a.folderNote).FontSize(textSmall).TextColor(color)
+					}
+					if p := a.folderWaiting; p != nil {
+						ui.Column(c).Gap(8).Padding(12).Radius(8).Background(sunken(t)).Border(1, hairlines(t)).Children(func() {
+							if p.Existing != nil {
+								ui.Text(c, fmt.Sprintf("Use the %s in %s here? Your current songs are copied to the backups folder first.",
+									songCount(len(p.Existing.Songs)), p.Dir)).FontSize(textBody).FontWeight(600)
+								ui.Row(c).Gap(8).Children(func() {
+									ui.Button(c, "Cancel").OnClick(a.cancelFolder)
+									ui.PrimaryButton(c, "Use those songs").OnClick(a.confirmFolder)
+								})
+								return
+							}
+							ui.Text(c, fmt.Sprintf("Keep the %s here in %s?", songCount(len(a.songs)), p.Dir)).
+								FontSize(textBody).FontWeight(600)
+							ui.Row(c).Gap(8).Children(func() {
+								ui.Button(c, "Cancel").OnClick(a.cancelFolder)
+								ui.PrimaryButton(c, "Use this folder").OnClick(a.confirmFolder)
+							})
+						})
+					}
+				})
+
+				// Data
+				settingsCard(c, "Data", "What survives a restart, and how to keep it.", func() {
+					ui.Text(c, "The songs, the run of show and the preferences save as you work. One copy of each day's work is kept automatically; a backup is one file you can copy to another machine.").
+						FontSize(textBody).TextColor(t.TextMuted)
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
+						ui.Button(c, "Back up…").Label("Back up songs and run of show").OnClick(a.backUpSongs)
+						ui.Button(c, "Restore…").Label("Restore from a backup").OnClick(a.chooseRestore)
+						ui.Button(c, "Version history").Label("Open the version history").OnClick(a.showHistory)
+					})
+					if a.backupNote != "" {
+						color := t.TextMuted
+						if a.backupNoteErr {
+							color = t.Danger
+						}
+						ui.Text(c, a.backupNote).FontSize(textSmall).TextColor(color)
+					}
+					if a.historyNote != "" {
+						ui.Text(c, a.historyNote).FontSize(textSmall).TextColor(t.TextMuted)
+					}
+					if r := a.restoreWaiting; r != nil {
+						ui.Column(c).Gap(8).Padding(12).Radius(8).Background(sunken(t)).Border(1, hairlines(t)).Children(func() {
+							ui.Text(c, fmt.Sprintf("Replace %s here with %s from %s?",
+								songCount(len(a.songs)), songCount(len(r.Library.Songs)), filepath.Base(r.Path))).
+								FontSize(textBody).FontWeight(600)
+							detail := "Your current songs and run of show are copied to the backups folder first."
+							if r.Show != nil {
+								detail = "The backup's run of show replaces the current one. " + detail
+							}
+							ui.Text(c, detail).FontSize(textSmall).TextColor(t.TextMuted)
+							ui.Row(c).Gap(8).Children(func() {
+								ui.Button(c, "Cancel").OnClick(a.cancelRestore)
+								ui.PrimaryButton(c, "Replace").OnClick(a.confirmRestore)
+							})
+						})
+					}
+					if a.settingsDir == "" {
+						ui.Text(c, "Preferences are not saved in this session.").FontSize(textBody).TextColor(t.TextMuted).SingleLine()
+					}
+					if a.showNote != "" {
+						ui.Text(c, a.showNote).FontSize(textSmall).TextColor(t.Danger)
+					}
+					ui.Text(c, "The hymns and the King James verses are public domain.").FontSize(textBody).TextColor(t.TextMuted)
+				})
+			})
 		})
+	})
+}
+
+// settingsCard is one group of preferences: a tracked heading over a raised
+// card, so the page reads as three answers rather than one long form.
+func settingsCard(c *ui.Context, title, caption string, body func()) {
+	t := c.Theme()
+	ui.Column(c).Gap(8).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(4, 0, 0).Children(func() {
+			ui.Text(c, title).FontSize(textLabel).FontWeight(700).LetterSpacing(0.9).
+				TextColor(t.TextMuted).SingleLine()
+			ui.Box(c).Height(1).Grow(1).Background(hairlines(t))
+			ui.Text(c, caption).FontSize(textLabel).TextColor(t.TextMuted).SingleLine()
+		})
+		ui.Column(c).Gap(12).Padding(18, 16).Radius(12).Border(1, t.Border).
+			Background(raisedRow(t)).Children(body)
 	})
 }
 
@@ -229,17 +367,21 @@ func (a *app) settingsBody(c *ui.Context) {
 // it actually publishing, and in HD?".
 func (a *app) ndiStatsSection(c *ui.Context) {
 	t := c.Theme()
-	ui.Text(c, "NDI stream").FontSize(12).FontWeight(600).SingleLine()
-	ui.Text(c, "Sender stats: NDI 5 and 6 have no receiver tally.").FontSize(10).TextColor(t.TextMuted)
+	ui.Divider(c)
+	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "NDI stream").FontSize(textTitle).FontWeight(600).SingleLine()
+		ui.Text(c, "NDI 5 and 6 report no receivers, so these are the sender's own counts.").
+			FontSize(textSmall).TextColor(t.TextMuted).SingleLine()
+	})
 	if a.ndi == nil {
-		ui.Text(c, "Not publishing, so there is nothing to measure.").FontSize(11).TextColor(t.TextMuted)
+		ui.Text(c, "Not publishing, so there is nothing to measure.").FontSize(textBody).TextColor(t.TextMuted)
 		return
 	}
 	// Ask the console for the stats timer: the numbers only move while this
 	// page draws them.
 	a.statsWanted = true
 	s := a.ndi.snapshot()
-	ui.Textf(c, "%d × %d · %.1f fps · %s", s.Width, s.Height, s.FPS, formatUptime(s.Uptime)).FontSize(13).FontWeight(600).SingleLine()
+	ui.Textf(c, "%d × %d · %.1f fps · %s", s.Width, s.Height, s.FPS, formatUptime(s.Uptime)).FontSize(16).FontWeight(700).SingleLine()
 	rows := [][2]string{
 		{"Frames sent", formatCount(s.Frames)},
 		{"Skipped", formatCount(s.Dropped)},
@@ -248,12 +390,14 @@ func (a *app) ndiStatsSection(c *ui.Context) {
 	if s.Err != "" {
 		rows = append(rows, [2]string{"Last error", s.Err})
 	}
-	for _, row := range rows {
-		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, row[0]).FontSize(11).TextColor(t.TextMuted).Width(110).SingleLine()
-			ui.Text(c, row[1]).FontSize(11).SingleLine()
-		})
-	}
+	ui.Column(c).Gap(4).Padding(12, 10).Radius(8).Background(innerWell(t)).Children(func() {
+		for _, row := range rows {
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, row[0]).FontSize(textSmall).TextColor(t.TextMuted).Width(90).SingleLine()
+				ui.Text(c, row[1]).FontSize(textSmall).SingleLine()
+			})
+		}
+	})
 }
 
 // settingsHeading is the small uppercase heading the page repeats.

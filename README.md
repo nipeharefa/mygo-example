@@ -5,8 +5,10 @@ A simple worship presenter for a small church screen, built with
 domain hymns and King James verses, previews the next slide on a monitor
 while one slide goes to a separate stage window, and can publish that stage
 as an NDI video source for OBS or a projector feed — with no window on
-screen, so one monitor is enough. Everything stays on the machine: no
-account, no network, no database.
+screen, so one monitor is enough. A separate **Song editor** window edits
+the song library itself: parts, slides, text and text size. Everything stays on the machine: no
+account and no network, with one local database that keeps the last 200
+versions of the songs.
 
 Sign in with **admin** / **admin**. The sign-in is a demo gate, not
 security.
@@ -30,32 +32,36 @@ The builds are not signed. On macOS, right-click the app and choose
 
 The window is the **console**: the song and Bible library on the left,
 the run of show in the middle, and the stage panel on the right. The panel
-shows the **stage** (what the room sees) above the **monitor** (the row you
+shows the **stage** (what the room sees) above the **monitor** (the tile you
 are looking at). Moving the monitor never changes the room until you press
 **Go Live**.
 
-1. Sign in. A fresh session starts with Amazing Grace and Psalm 23:1 on
-   the list.
+1. Sign in. A fresh session starts with Amazing Grace and Psalm 23:1 in
+   the run of show.
 2. Add songs from **Songs** and verses from **Bible**. Adding a song puts
-   every section in the list; the search boxes and the pack picker narrow
-   the library, not the list.
-3. Click a row, use **←** / **→**, or press **Next** / **Prev** to move the
-   monitor. Press **Go Live**, **Enter** on the list, or **Cmd/Ctrl+Enter**
-   to put that row on stage. The row on air carries a `LIVE` badge.
-4. Drag a row to move it, or use **Move up** / **Move down**; the slide on
-   air stays on air wherever its row lands. **Remove** drops the selected
-   row, and **Black out** hides the text without touching the list.
+   every part's slides in the run of show, in order; the search boxes and
+   the pack picker narrow the library, not the run of show.
+3. Click a tile, use **←** / **→**, or press **Next** / **Prev** to move
+   the monitor. Press **Go Live**, **Enter**, or **Cmd/Ctrl+Enter** to put
+   that slide on stage, or press the tile's **▶** to send just that slide.
+   The tile on air carries a copper frame and a `LIVE` badge.
+4. Every slide is a tile, every song heads its own group. Drag a slide by
+   its picture onto another tile, on the half where it should land, or use
+   its **↑** / **↓**; either keeps it on air wherever its slide lands. The
+   tile's **✕** drops it, and **Black out** hides the text without touching
+   the deck. The tile shows the whole slide as the room will see it.
 5. **Open output** opens the stage window. It is a 1280×720 window unless
    **Settings** names a display, in which case it opens fullscreen there.
    **Present** toggles fullscreen, **Close output** closes it. On one
    monitor, skip the window altogether: turn on NDI instead, and OBS or
    NDI Video Monitor shows the stage while the console keeps the keyboard.
-   The **Settings** page (Cmd/Ctrl+, or the button in the top bar) also
-   holds the NDI switch, the output size and the stream's own stats; the
-   **Help** menu lists the shortcuts and the NDI setup.
+   The **Settings** page (Cmd/Ctrl+, or **Settings** in the **Account**
+   pane at the end of the bar) also holds the NDI switch, the output size,
+   the stream's own stats, and the backup and restore buttons; the **Help**
+   menu lists the shortcuts and the NDI setup.
 
-The console shortcuts are **←** / **→** for the monitor, **B** for blackout,
-and **Cmd/Ctrl+Enter** to go live. In the stage window **← → ↑ ↓** and
+The console shortcuts are **←** / **→** for the monitor, **Enter** or
+**Cmd/Ctrl+Enter** to go live, and **B** for blackout. In the stage window **← → ↑ ↓** and
 **Space** move the stage (pulling the monitor along), **B** toggles blackout,
 and **Esc** leaves fullscreen; when the stage is windowed, **Esc** closes
 it. The stage window has no title bar, so drag the slide itself to move it
@@ -65,16 +71,96 @@ The stage opens once and stays open until you close it: changing anything
 that does not touch the display the stage is on leaves it alone. Closing it
 does not stop NDI, so a feed can keep running with no stage window at all.
 
-The display and NDI preferences are saved between runs; the run of show is
-not. A saved display that is no longer attached falls back to a window.
+The display and NDI preferences, the song library and the run of show are
+saved between runs: closing the app and opening it again brings the set
+back, cursor included. A saved display that is no longer attached falls
+back to a window.
 
-**Check for Updates** (a button on the console, and on the Help page) asks
+**Check for Updates** (in the **Account** pane, and on the Help page) asks
 GitHub for the newest release and offers
 to install it; the app then restarts on the new version. Updates work only
 for the installers from a release — a development build, or an install a
 package manager owns (such as the `.deb`), is updated another way. Every
 release on GitHub carries per-platform update archives that are signed with
 the project's key, so an app accepts only updates it can verify.
+
+## Editing songs
+
+**Song editor** in the console header opens a separate window for the song
+library. It is three zones: the library on the left, the selected song's
+structure in the middle, and the slide desk on the right. A song has an author,
+a key, a text size, and one or more **parts** (a verse, a chorus, a bridge);
+each part holds one or more **slides**, and a slide is the text that fills one
+stage frame.
+
+**New song** asks for a title, author, key and first part, and takes the words
+too: one blank line starts a new slide. **Add part** continues the verse
+numbering, or names a plain part when the labels are not verses. **Paste words**
+under the slide text turns a whole verse into slides the same way. Choosing a
+song, a slide or a part puts the caret in the words, so the next key is a
+lyric; **Add slide below** inserts and focuses the new slide.
+
+**Slide** is the working tab: the part and slide number with **‹** / **›**, the
+preview as the room sees it, the words, then **Add slide below**,
+**Duplicate**, **Paste words** and **Remove slide**. The part's own name carries
+**Remove part**, so a verse added by mistake goes from here in one click. **Song**
+holds the title, author, key, text size, the part label and **Add part to run of
+show**, and **Remove song**, which asks before deleting.
+
+Every edit saves to `library.json` in the app data directory, and the header
+says **Saved**, or names a write failure. There is no Save button. A first
+launch seeds that file from the five built-in hymns. **Restore samples** at the
+foot of the library brings back any built-in song whose id the library lost and
+never overwrites a song you edited. **Add song to run of show** puts every part
+in the run of show in order; **Add part to run of show** adds just that part,
+so a chorus can follow every verse without another copy of the song.
+
+The run of show keeps the words it was given: editing a slide later does not
+rewrite a slide already added. Add the song again to use the new words.
+
+**Text size** is one number per song, in stage units at the 1280×720 design:
+40 is the built-in size and the slider spans 24 to 72. The editor's 16:9
+preview, the stage window and the NDI feed all scale from that number, so a
+smaller output shrinks the text with it instead of clipping it. A slide
+copies its size when it is added, so changing a song later does not rewrite
+slides already in the run of show.
+
+## Backing up and syncing
+
+Settings > Data keeps the work safe without a Save button.
+
+- On the first save of each day the app writes a copy of the songs and the
+  run of show into a `backups` folder in the app data directory; the last 14
+  days are kept.
+- **Back up…** writes one file, named for the day, wherever you choose. It
+  holds the songs and the run of show, and it is the file to copy to another
+  machine, a USB stick or a cloud folder.
+- **Restore…** reads such a file, or a copy of `library.json`, says how many
+  songs it holds, and asks before it replaces anything. The songs and the set
+  you have now are copied into `backups` first, so a wrong pick costs a few
+  seconds, not the library.
+
+Settings > **Songs folder** is the sync: pick a folder your cloud app
+already syncs, such as iCloud Drive or Dropbox, and the app keeps
+`library.json` there. The run of show, the preferences and the backups stay
+with each machine, since a set is built locally. The app has no network of
+its own; the folder is what carries the songs.
+
+Edit on one machine at a time. Before every save the app checks that the
+file is the one it last read or wrote; if another machine changed it, the
+app asks whether to **Reload the file** or **Keep my songs**, and whichever
+copy loses is saved in `backups` as a conflict file, not thrown away.
+**Reload** on the card pulls in a file another machine saved while this one
+was open.
+
+The songs and the run of show are plain JSON, so they can be read and copied
+without the app. Settings > Data also opens **Version history**: the app
+saves a version of the songs whenever editing pauses, keeps the last 200,
+and lists them newest first. **Restore** puts one back after asking, and the
+state it replaces is copied into `backups` first. The versions live in
+`history.db`, a local SQLite file, which is the one thing here that is not
+JSON. Where the database module cannot load, the page says history is off
+and everything else works.
 
 ## The live output as an NDI source
 

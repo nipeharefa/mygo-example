@@ -47,12 +47,59 @@ type app struct {
 	verseQuery string
 	pack       string
 
+	songs []song // the active library: library.json once loaded
+
 	deck     []slide
 	preview  int // the row selected in the monitor
 	stage    int // the row on air
 	blackout bool
 	nextID   int
-	deckList ui.ListState
+	// pendingDrop is a tile dropped in the frame just built, applied by
+	// settle once the build is done: ui.Drop delivers during the build.
+	pendingDrop *deckDrop
+	// menuOpen shows the account pane in the top bar.
+	menuOpen bool
+
+	// The run of show on disk: what was last written, whether the file may
+	// not be overwritten, and the note that says why.
+	showSaved   string
+	showBlocked bool
+	showNote    string
+
+	// Backups: the day's snapshot is taken once, the file dialogs go
+	// through seams the tests answer, and the Settings page reads the note
+	// and the restore the operator is being asked about.
+	saveFile       func(mygo.SaveDialogOptions) (string, error)
+	openFile       func(mygo.OpenDialogOptions) ([]string, error)
+	askMessage     func(mygo.MessageOptions) (mygo.MessageResult, error)
+	backupDay      string
+	backupNote     string
+	backupNoteErr  bool
+	restoreWaiting *restorePlan
+
+	// The songs folder: empty means the app data directory, and a chosen
+	// folder carries the stamp of the file this app last read or wrote, so
+	// another machine's write is noticed before it is replaced.
+	libraryFolder  string
+	libraryStamp   string
+	libraryBlocked bool
+	libraryNote    string
+	folderNote     string
+	folderNoteErr  bool
+	folderWaiting  *folderPlan
+
+	// Version history: the local store, the list the page shows, the one
+	// trailing timer that turns a burst of edits into one version, and the
+	// version the page is asking about.
+	history         historyStore
+	historyNote     string
+	historyRows     []revision
+	historyRowsErr  string
+	historyTimer    *time.Timer
+	historyPending  bool
+	historyWhat     string
+	historyHash     string
+	revisionWaiting int64
 
 	win  *mygo.Window
 	live *mygo.Window
@@ -62,7 +109,29 @@ type app struct {
 	newWindow  func(mygo.WindowOptions) *mygo.Window
 	mainScreen func() []mygo.Display
 
-	help        *mygo.Window
+	help              *mygo.Window
+	editor            *mygo.Window
+	openEditor        bool // the frame asked for the editor window
+	editSong          int  // selection in a.songs
+	editPart          int
+	editSlide         int
+	editorStatus      string
+	editorStatusErr   bool // editorStatus is a refusal or a failed save
+	editQuery         string
+	editorTab         int  // which desk tab the editor shows
+	newSongOpen       bool // the New song dialog is open
+	newSongTitle      string
+	newSongAuthor     string
+	newSongKey        string
+	newSongPart       string
+	newSongWords      string
+	pasteOpen         bool // the Paste words dialog is open
+	pasteText         string
+	confirmRemoveSong bool // the Song tab is asking before deleting
+	// editorFocus is the slide whose text should take the caret, as a key
+	// shared with the text area's FocusBind: choosing, adding or opening a
+	// slide puts the caret there, and clicking elsewhere hands it back.
+	editorFocus string
 	settingsDir string // app data dir; empty keeps tests headless
 	version     string // mygo.App.Version(); empty under go run
 
@@ -72,10 +141,14 @@ type app struct {
 	// cannot answer a dialog.
 	ctx       context.Context
 	updatable bool
-	updateChk func(ctx context.Context) (*mygo.Update, error)
-	updateAsk func(mygo.MessageOptions) (mygo.MessageResult, error)
-	updateDl  func(ctx context.Context, up *mygo.Update, progress func(downloaded, total int64)) error
-	updateRun func()
+	// updateChannel follows the saved preference: false offers stable releases
+	// only, true offers the newest beta too.
+	updateChannel bool
+	setBeta       func(on bool) // the seam for mygo.Updater.SetPrereleases
+	updateChk     func(ctx context.Context) (*mygo.Update, error)
+	updateAsk     func(mygo.MessageOptions) (mygo.MessageResult, error)
+	updateDl      func(ctx context.Context, up *mygo.Update, progress func(downloaded, total int64)) error
+	updateRun     func()
 
 	// The stage: where it opens, where the open window went, and whether
 	// NDI publishes it.
@@ -106,13 +179,18 @@ func newApp() *app {
 		pack:       packs[0].Name,
 		newWindow:  mygo.NewWindow,
 		mainScreen: mygo.Screen.Displays,
+		setBeta:    mygo.Updater.SetPrereleases,
 		updateChk:  mygo.Updater.Check,
 		updateAsk:  mygo.Dialog.Message,
 		updateDl: func(ctx context.Context, up *mygo.Update, progress func(downloaded, total int64)) error {
 			return up.Install(ctx, progress)
 		},
-		updateRun: func() { mygo.App.Relaunch() },
+		updateRun:  func() { mygo.App.Relaunch() },
+		askMessage: mygo.Dialog.Message,
 	}
+	a.songs = cloneSongs(builtinSongs)
+	a.editSong, a.editPart, a.editSlide = -1, -1, -1
+	a.editorTab = editorSlideTab
 	a.addSong("amazing-grace")
 	a.addVerse("Psalm 23:1")
 	a.preview, a.stage = 0, 0
@@ -138,12 +216,23 @@ func (a *app) signOut() {
 	a.closeOutput()
 	a.stopNDI()
 	a.closeHelp()
+	a.closeEditor()
+	a.openEditor = false
 	a.page = pageConsole
+	a.menuOpen = false
 	a.signedIn = false
 	a.password = ""
 	a.authErr = ""
 	a.blackout = false
 	a.preview, a.stage = 0, 0
+	a.editorTab = editorSlideTab
+	a.editorStatus, a.editorStatusErr = "", false
+	a.newSongOpen, a.pasteOpen, a.confirmRemoveSong = false, false, false
+	a.restoreWaiting = nil
+	a.folderWaiting = nil
+	a.revisionWaiting = 0
+	a.folderNote, a.folderNoteErr = "", false
+	a.backupNote, a.backupNoteErr = "", false
 }
 
 // clearAuthError hides a stale error as soon as either field changes.
@@ -155,6 +244,7 @@ func (a *app) clearAuthError() {
 // main-thread callbacks after every deck mutation, never from the build
 // pass.
 func (a *app) changed() {
+	a.saveShow()
 	if a.win != nil {
 		a.win.Invalidate()
 	}
@@ -163,6 +253,9 @@ func (a *app) changed() {
 	}
 	if a.help != nil {
 		a.help.Invalidate()
+	}
+	if a.editor != nil {
+		a.editor.Invalidate()
 	}
 }
 
@@ -179,6 +272,18 @@ func (a *app) requestStage() {
 // Context.After while openStage is set) so the console draws the frame it
 // asked for before a new window works takes the main thread.
 func (a *app) settle() {
+	// A dropped tile reorders the deck after the frame is built, so the
+	// build that saw the drop stays a function of the state it read.
+	if d := a.pendingDrop; d != nil {
+		a.pendingDrop = nil
+		a.dropSlide(*d)
+	}
+	if a.openEditor {
+		a.openEditor = false
+		if a.win != nil && a.editor == nil {
+			a.openEditorWindow()
+		}
+	}
 	if a.openStage {
 		a.openStage = false
 		if a.win != nil && a.live == nil {
@@ -275,6 +380,7 @@ func (a *app) ndiLabel() string {
 const (
 	pageConsole = iota
 	pageSettings
+	pageHistory
 )
 
 // The sizes the feed publishes at, in the order Settings offers them.
@@ -307,12 +413,18 @@ func main() {
 			log.Printf("mygo-demo: no app data directory: %v", err)
 		}
 		a.loadSettings()
+		a.loadLibrary()
+		a.loadShow()
+		a.openHistory()
 		if os.Getenv("MYGO_NDI") != "" {
 			// Session-only override: publish without rewriting the preference.
 			a.ndiOn = true
 		}
 		a.version = mygo.App.Version()
 		a.updatable = mygo.Updater.Enabled() || updatableOverride
+		if a.setBeta != nil {
+			a.setBeta(a.updateChannel)
+		}
 		mygo.App.SetMenu(buildMenu(a))
 		mygo.Screen.OnDisplaysChanged(a.displaysChanged)
 		a.win = a.newWindow(mygo.WindowOptions{
@@ -328,6 +440,7 @@ func main() {
 		a.tickStats()
 	})
 	mygo.App.OnQuit(a.stopNDI)
+	mygo.App.OnQuit(a.closeHistory)
 	mygo.App.OnQuit(cancel)
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
