@@ -2,8 +2,9 @@
 
 `mygo-demo` is a worship presenter: a console window where an operator
 builds a run of show, a stage window that shows one slide at a time to the
-room, and Settings and Help windows opened on demand. Everything is local
-and in memory, and every window is rebuilt from one `app` struct. This
+room, and Settings and Help windows opened on demand. Every window is
+rebuilt from one `app` struct, and the songs and the run of show are saved
+as JSON beside the preferences. This
 document covers the state, the four windows, the theme split, the NDI path,
 and what the tests pin.
 
@@ -12,7 +13,8 @@ and what the tests pin.
 `main()` builds the `app` and waits for `mygo.App.WhenReady`. Inside that
 callback, in order, it resolves the app data directory
 (`mygo.App.Path(mygo.PathUserData)`), reads the display list, loads the
-saved settings, maps `MYGO_NDI=1` onto the session's NDI preference, reads
+saved settings, loads the song library and then the run of show, maps
+`MYGO_NDI=1` onto the session's NDI preference, reads
 the packaged version, installs the application menu, subscribes to display
 changes, and then opens the console window with `mygo.NewWindow`:
 
@@ -21,8 +23,8 @@ changes, and then opens the console window with `mygo.NewWindow`:
 
 `mygo.App.OnQuit(a.stopNDI)` makes quitting the app unregister any NDI
 source, and `mygo.App.Run()` runs the main loop. There is no second
-process and no HTTP server; the files are `settings.json` and
-`library.json` in the app data directory.
+process and no HTTP server; the files are `settings.json`, `library.json`
+and `show.json` in the app data directory.
 
 The console's view sets the console theme, draws the login card while
 `!a.signedIn`, and otherwise registers the console shortcuts and draws the
@@ -43,6 +45,7 @@ element or a context:
 | `tab` | 0 = Songs, 1 = Bible |
 | `songQuery`, `verseQuery`, `pack` | library filters; `pack` is the selected verse pack name |
 | `deck []slide`, `preview int`, `stage int` | the run of show, the tile selected in the monitor, and the slide on air |
+| `showSaved string`, `showBlocked bool`, `showNote string` | what `show.json` last held, whether it may not be overwritten, and the note that says why |
 | `blackout bool` | the stage shows a black frame, deck unchanged |
 | `nextID int` | slide id counter |
 | `menuOpen bool` | the Account pane in the top bar is open |
@@ -132,7 +135,7 @@ resets the selection. `clearAuthError` runs on either field's change.
 
 `signOut` closes the stage, Settings and Help windows, stops NDI, and
 clears session state including blackout. The display and NDI preferences
-survive it on purpose; the run of show does not.
+and the run of show survive it on purpose.
 
 ## The windows
 
@@ -474,6 +477,33 @@ Do not add copyrighted lyrics or a modern translation. Verses are unique
 by reference, song ids are unique in the library, and every song has at
 least one part; `data_test.go` and `deck_test.go` assert these.
 
+## What is saved
+
+Three small JSON files in the app data directory, all written through
+`writeFileAtomic` (a temporary file beside the target, a sync, a rename):
+
+- `settings.json` — display id, NDI on/off, the NDI frame size, the update
+  channel.
+- `library.json` — the songs, their parts, slides and text size, written by
+  the editor on every change. A first launch seeds it from `builtinSongs`.
+- `show.json` — the run of show: every slide with its words and size, the
+  monitor and stage rows, and the next slide id. `changed()` calls
+  `saveShow`, which serializes the deck and skips the write when the bytes
+  match what it last wrote; the monitor cursor moving is the only state
+  that changes on some passes, so an idle repaint costs nothing. A first
+  launch seeds a deck of Amazing Grace and Psalm 23:1.
+
+`loadShow` replaces the seed when the file exists, clamps the cursor,
+repairs empty or duplicate slide ids, and sets `a.nextID` past every id in
+the file. A file it cannot read, including one from a newer `showVersion`,
+is left untouched: `a.showBlocked` stops every later write and
+`a.showNote` says so on the Settings page. The bug this avoids is an older
+build quietly flattening a newer set.
+
+This is not a document model, so there is no Save button and no untitled
+state. The run of show is saved as it is built, which is what a service
+needs when the machine is closed between rehearsal and the meeting.
+
 ## Rendering details worth knowing
 
 - Widget state that must persist between passes is listed in `app`:
@@ -524,6 +554,13 @@ tests must not press **Open output**).
   seeding on first launch, corrupt files left untouched, an empty song list,
   the empty `settingsDir` no-op, normalization, deep clones, and unique new
   song ids.
+- `show_test.go` — the run of show round-trip, the cursor clamped to the
+  deck, the seed kept when the file is missing, a newer version refused and
+  left unwritten, empty and duplicate ids repaired, no write when nothing
+  changed, a failed write reported through `showNote`, and the file's keys.
+- `store_test.go` — `writeFileAtomic` replaces in one step, leaves no
+  temporary file, keeps the old file when the write fails, creates the
+  directory, and writes 0644.
 - `slideview_test.go` — `stageScale` and the metrics at full and half width.
 - `editor_test.go` — the editor window lifecycle (request, settle, close,
   sign-out, `changed()` nil-safety), the console button, empty and filtered
@@ -591,19 +628,21 @@ the arrows, black out, open the output (fullscreen with a second display),
 change slides, leave fullscreen with Esc, open the **Song editor**, edit a
 part's slide and the text size and check the preview and the stage agree,
 add one part to the run of show, restart to confirm `library.json` kept the
-edit, and with `MYGO_NDI=1` check that the NDI source follows the stage with
-the stage window closed too, and that sign-out stops it. On a sandboxed
+edit and `show.json` kept the set, and with `MYGO_NDI=1` check that the NDI
+source follows the stage with the stage window closed too, and that sign-out
+stops it. On a sandboxed
 agent session, prefix Go commands with `GOCACHE="$TMPDIR/gocache-mygo-demo"`.
 
 ## Known drift and gaps
 
 - **The stage is one window.** There is no separate preview output and no
   per-display preview; the monitor lives in the console.
-- **The library persists; the run of show does not.** `library.json` holds
-  every song's parts, slides and text size, and `settings.json` holds the
-  display and NDI preferences. The deck, the search boxes and the selected
-  pack live only in the process, so closing the app starts over from the
-  seed set.
+- **The library and the run of show persist; the search boxes do not.**
+  `library.json` holds every song's parts, slides and text size,
+  `show.json` holds the deck and its cursor, and `settings.json` holds the
+  display and NDI preferences. The search boxes and the selected pack live
+  only in the process. A first launch seeds the library and a two-slide
+  deck; after that the files are the state.
 - **A song has no arrangement list.** The run of show is the arrangement:
   adding a part again is how a chorus repeats. There is no per-song order
   or repeat count.
@@ -626,8 +665,8 @@ agent session, prefix Go commands with `GOCACHE="$TMPDIR/gocache-mygo-demo"`.
   is a button or a menu item.
 - **One stage window and one monitor.** Opening the stage again focuses
   the existing one; there is no multi-output or per-display preview feature.
-- **No undo/redo and no session recovery.** A mistaken removal or a crash
-  loses the run of show.
+- **No undo/redo and no session recovery.** A mistaken removal loses the
+  run of show for good; the file only ever holds the current one.
 
 The MyGo lifetime and identity rules, and the widget inventory this app
 was written against, are in

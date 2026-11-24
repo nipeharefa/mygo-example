@@ -52,16 +52,14 @@ func readLibrary(path string) (libraryFile, error) {
 	return f, nil
 }
 
-// writeLibrary writes the whole file, creating the directory first.
+// writeLibrary writes the whole file in one step, so a crash mid-write
+// cannot leave a half library behind.
 func writeLibrary(path string, f libraryFile) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return writeFileAtomic(path, append(data, '\n'))
 }
 
 // libraryPath is where the songs live, or "" before the app is ready (and in

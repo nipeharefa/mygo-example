@@ -60,6 +60,12 @@ type app struct {
 	// menuOpen shows the account pane in the top bar.
 	menuOpen bool
 
+	// The run of show on disk: what was last written, whether the file may
+	// not be overwritten, and the note that says why.
+	showSaved   string
+	showBlocked bool
+	showNote    string
+
 	win  *mygo.Window
 	live *mygo.Window
 
@@ -197,6 +203,7 @@ func (a *app) clearAuthError() {
 // main-thread callbacks after every deck mutation, never from the build
 // pass.
 func (a *app) changed() {
+	a.saveShow()
 	if a.win != nil {
 		a.win.Invalidate()
 	}
@@ -365,6 +372,7 @@ func main() {
 		}
 		a.loadSettings()
 		a.loadLibrary()
+		a.loadShow()
 		if os.Getenv("MYGO_NDI") != "" {
 			// Session-only override: publish without rewriting the preference.
 			a.ndiOn = true

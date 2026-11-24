@@ -70,9 +70,10 @@ The stage opens once and stays open until you close it: changing anything
 that does not touch the display the stage is on leaves it alone. Closing it
 does not stop NDI, so a feed can keep running with no stage window at all.
 
-The display and NDI preferences and the song library are saved between
-runs; the run of show is not. A saved display that is no longer attached
-falls back to a window.
+The display and NDI preferences, the song library and the run of show are
+saved between runs: closing the app and opening it again brings the set
+back, cursor included. A saved display that is no longer attached falls
+back to a window.
 
 **Check for Updates** (in the **Account** pane, and on the Help page) asks
 GitHub for the newest release and offers

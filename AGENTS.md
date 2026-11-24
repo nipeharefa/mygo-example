@@ -13,8 +13,8 @@ no database, and no web page in use.
 The sign-in is a demo gate, not security: the account is the
 `demoUsername`/`demoPassword` pair in `main.go`, `signedIn` lives on
 `app`, and nothing lasts beyond the process except the display and NDI
-preferences in `settings.json` and the song library in `library.json`, two
-small JSON files in the app data directory.
+preferences in `settings.json`, the song library in `library.json` and the
+run of show in `show.json`, small JSON files in the app data directory.
 
 **Read [docs/architecture.md](docs/architecture.md) before changing the
 view.** It describes the state model, every window, the frame contract,
@@ -116,15 +116,21 @@ identity rules live in
   closes and reopens it. Never reopen it from a display notification, and
   nil `a.live` before `Close()` — a `Close()` whose `OnClosed` guard has
   already been satisfied never destroys the window.
-- **Two files persist: the settings and the song library.**
-  `settings.go` reads and writes `settings.json` (display ID, NDI on/off,
-  NDI frame size) and `library.go` reads and writes `library.json` (the
-  songs, their parts, slides and text size) in
-  `mygo.App.Path(mygo.PathUserData)`. `a.settingsDir` is empty until
-  `WhenReady` and in tests, and `saveSettings`/`saveLibrary` then do
-  nothing. A first launch seeds `library.json` from `builtinSongs`; after
-  that the file is the library and the editor writes it on every change.
-  The run of show is session-only; do not persist it unasked.
+- **Three files persist: the settings, the song library and the run of
+  show.** `settings.go` reads and writes `settings.json` (display ID, NDI
+  on/off, NDI frame size), `library.go` reads `library.json` (the songs,
+  their parts, slides and text size) and `show.go` reads and writes
+  `show.json` (the deck, the monitor and stage rows, the next slide id), all
+  in `mygo.App.Path(mygo.PathUserData)`. `a.settingsDir` is empty until
+  `WhenReady` and in tests, and every save then does nothing. A first launch
+  seeds `library.json` from `builtinSongs` and the deck from Amazing Grace
+  and Psalm 23:1; after that the files are the library and the set. Every
+  write goes through `writeFileAtomic`: a temporary file beside the target,
+  then a rename, so a crash cannot leave half a file. `changed()` calls
+  `saveShow`, and `saveShow` skips the write when the serialized deck is
+  what it last wrote, so a repaint costs no disk. `show.json` from a newer
+  version is refused and never overwritten (`a.showBlocked`), with
+  `a.showNote` saying so on the Settings page.
 - **Do not edit `src/mygo.ts` by hand.** It is `mygo generate` output, and
   the web frontend is currently unused (see "Known state").
 - **NDI output stays pure Go, and the binding lives in one file.**
@@ -208,10 +214,12 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 
 | Path | What |
 | --- | --- |
-| `main.go` | The app: `app` state and its `newWindow`/`mainScreen` seams, the demo account, sign-in/out, `changed`, `requestStage`/`settle`, `tickStats`, `setNDI`/`toggleNDI`/`ndiLabel`, `main()` startup order (app data dir, saved preferences, menu, display subscription, console window, first display refresh, stats timer), and the `stageSourceName` constant. |
+| `main.go` | The app: `app` state and its `newWindow`/`mainScreen` seams, the demo account, sign-in/out, `changed` (which saves the run of show), `requestStage`/`settle`, `tickStats`, `setNDI`/`toggleNDI`/`ndiLabel`, `main()` startup order (app data dir, saved preferences, library, run of show, menu, display subscription, console window, first display refresh, stats timer), and the `stageSourceName` constant. |
 | `data.go` | The seed library: `builtinSongs` (5 public-domain hymns as `song{... Parts []songPart}`), 4 KJV verse packs (16 verses), `findSong`, `verseByRef`, the text-size limits and `clampTextSize`. |
 | `deck.go` | The run-of-show model: `slide` (including its snapshotted `TextSize`), `slideKind`, add/select/next/prev (monitor), `addSongParts`/`addPartSlides`/`addPart`, `takeSlide`/`takeSlideAt`, `nextStage`/`prevStage`, remove/move/blackout (`removeSlideAt`, `moveSlideAt`), `reorderSlides` (the move path, `to` is a gap), `stageSlide`/`previewSlide`/`upcomingSlide`, `clampSlides`. |
 | `library.go` | The song library: `library.json` read/write and versioning, `loadLibrary`/`saveLibrary`, first-launch seeding from `builtinSongs`, `normalizeLibrary`, `cloneSongs`, `newSongID`, and `(a *app) songByID`/`libraryPath`. |
+| `show.go` | The run of show on disk: `show.json` read/write and versioning, `loadShow`/`saveShow`, the id counter the restored deck needs, and the refusal that keeps a newer file from being overwritten. |
+| `store.go` | `writeFileAtomic`, the one way a data file is replaced: a temporary file beside the target, a sync, a rename. |
 | `editor.go` | The Song editor window: `requestEditor`/`openEditorWindow`/`closeEditor`, the library card and search, the part/slide outline, the Slide/Song desk (`editorSlideDesk` with the preview, the text area and the header's **Remove part**, `editorSongDesk` with the details and the delete confirmation), `FocusBind` through `editorFocus`, `saveNote`/`editorRefused`, the New song and Paste words dialogs (`splitSlides`, `nextPartLabel`), and adding a song or part to the run of show. |
 | `slideview.go` | The shared slide renderer: `stageDesignWidth`/`Height`, `stageScale`, `slideMetrics`/`metricsFor`, and `slideBody`, used by the stage window, the NDI feed, the editor preview and the run of show's tiles. It draws the slide's text alone: the output carries no part label or song caption. |
 | `console.go` | The console view: top bar (including **Song editor** and the **Account** pane holding Settings, Check for Updates and Sign out), library (Songs/Bible tabs, search, pack picker), the run of show as a grid of whole-slide tiles grouped under each song (`deckGroups`, `deckGrid`, `deckTile`) with a go-live/move/remove toolbar per tile and drag-to-reorder on the picture (`deckDrag`, `dragLandsAfter`, `pendingDrop` applied by `settle`), the two-card stage/monitor panel with Go Live, and the login card. |
@@ -224,6 +232,8 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `update_test.go` | The updater without a window or a feed: version order, the newest-version and error notes, the offer, install-and-restart, Not Now, a failed install, and the two builds that cannot update. |
 | `view_test.go` | Headless console tests: login gate, library, add/search, monitor vs stage (click, Go Live, Enter, Cmd+Enter), arrows, blackout, empty deck, sign out. |
 | `library_test.go` | The library file without a window: round-trip, version/duplicate rejection, seeding, corrupt files, empty lists, normalization, clones, new ids. |
+| `show_test.go` | The run of show on disk without a window: round-trip, the cursor clamped, the seed kept when there is no file, a newer version refused and not overwritten, ids repaired, no write when nothing changed, a reported failure, and the file's keys. |
+| `store_test.go` | `writeFileAtomic`: replaces in one step, leaves no temporary file, keeps the old file when the write fails, creates the directory, and writes 0644. |
 | `data_test.go` | The built-in seeds: parts and slides, the All Creatures split, text-size defaults/clamps, slide counts, `findSong`. |
 | `slideview_test.go` | The shared renderer's scale and metrics at full and half width. |
 | `editor_test.go` | The editor headless: window lifecycle, console button, list/search/selection/width, tabs, typing (focus on open, song, slide and add; live preview; per-slide text; undo), save failures, split/duplicate/paste, part naming, part and slide guards (including removing a part or an empty part from the Slide tab), the song delete confirmation, new/remove/restore, add-to-show, and the deck staying a snapshot. |
@@ -255,8 +265,8 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 The web scaffold (`src/`, `index.html`, `vite.config.ts`, the `devUrl` and
 frontend settings in `mygo.config.ts`) and the `tick` event in
 `src/mygo.ts` predate the native UI and are unused. `dist/` is still built
-and embedded, but no window loads it. The run of show is not persisted
-and there is no undo/redo; only the display and NDI preferences and the
-song library survive a restart. These are recorded in
+and embedded, but no window loads it. There is no undo/redo; the display
+and NDI preferences, the song library and the run of show survive a
+restart. These are recorded in
 `docs/architecture.md` under "Known drift and gaps"; do not clean them up
 unasked.

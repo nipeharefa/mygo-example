@@ -62,17 +62,14 @@ func readSettings(path string) settings {
 	return s
 }
 
-// writeSettings stores the preferences, creating the app data directory on
-// first use.
+// writeSettings stores the preferences in one step, creating the app data
+// directory on first use.
 func writeSettings(path string, s settings) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return writeFileAtomic(path, append(data, '\n'))
 }
 
 // settingsPath is where the preferences live, or "" before the app is ready
@@ -235,10 +232,13 @@ func (a *app) settingsBody(c *ui.Context) {
 
 				// Data
 				settingsCard(c, "Data", "What survives a restart.", func() {
-					ui.Text(c, "The run of show is not saved. The display and NDI preferences are saved in the app data directory.").
+					ui.Text(c, "The run of show is saved and comes back at the next launch. The display and NDI preferences and the song library are saved in the app data directory.").
 						FontSize(textBody).TextColor(t.TextMuted)
 					if a.settingsDir == "" {
 						ui.Text(c, "Preferences are not saved in this session.").FontSize(textBody).TextColor(t.TextMuted).SingleLine()
+					}
+					if a.showNote != "" {
+						ui.Text(c, a.showNote).FontSize(textSmall).TextColor(t.Danger)
 					}
 					ui.Text(c, "The hymns and the King James verses are public domain.").FontSize(textBody).TextColor(t.TextMuted)
 				})
