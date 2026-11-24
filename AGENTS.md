@@ -117,8 +117,8 @@ identity rules live in
   closes and reopens it. Never reopen it from a display notification, and
   nil `a.live` before `Close()` — a `Close()` whose `OnClosed` guard has
   already been satisfied never destroys the window.
-- **Three files persist: the settings, the song library and the run of
-  show.** `settings.go` reads and writes `settings.json` (display ID, NDI
+- **Three JSON files hold the app's state: the settings, the song library
+  and the run of show.** `settings.go` reads and writes `settings.json` (display ID, NDI
   on/off, NDI frame size), `library.go` reads `library.json` (the songs,
   their parts, slides and text size) and `show.go` reads and writes
   `show.json` (the deck, the monitor and stage rows, the next slide id), all

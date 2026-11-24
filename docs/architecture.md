@@ -494,9 +494,9 @@ least one part; `data_test.go` and `deck_test.go` assert these.
 
 ## What is saved
 
-Three small JSON files, all written through
-`writeFileAtomic` (a temporary file beside the target, a sync, a rename),
-plus the `backups/` folder described below. All of them live in the app data
+Three small JSON files, all written through `writeFileAtomic` (a temporary
+file beside the target, a sync, a rename), the SQLite version history, and
+the `backups/` folder described below. All of them live in the app data
 directory except `library.json`, which follows the chosen songs folder when
 there is one:
 
