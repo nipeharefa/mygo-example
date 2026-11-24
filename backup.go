@@ -337,6 +337,7 @@ func (a *app) confirmRestore() {
 		return
 	}
 	a.saveShow()
+	a.noteHistory("Restored from a backup")
 	a.backupNote = fmt.Sprintf("Restored %s from %s.", songCount(len(a.songs)), filepath.Base(r.Path))
 	a.backupNoteErr = false
 	a.changed()

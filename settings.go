@@ -176,6 +176,7 @@ func (a *app) showConsole() {
 	a.page = pageConsole
 	a.restoreWaiting = nil
 	a.folderWaiting = nil
+	a.revisionWaiting = 0
 	a.changed()
 }
 
@@ -304,6 +305,7 @@ func (a *app) settingsBody(c *ui.Context) {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
 						ui.Button(c, "Back up…").Label("Back up songs and run of show").OnClick(a.backUpSongs)
 						ui.Button(c, "Restore…").Label("Restore from a backup").OnClick(a.chooseRestore)
+						ui.Button(c, "Version history").Label("Open the version history").OnClick(a.showHistory)
 					})
 					if a.backupNote != "" {
 						color := t.TextMuted
@@ -311,6 +313,9 @@ func (a *app) settingsBody(c *ui.Context) {
 							color = t.Danger
 						}
 						ui.Text(c, a.backupNote).FontSize(textSmall).TextColor(color)
+					}
+					if a.historyNote != "" {
+						ui.Text(c, a.historyNote).FontSize(textSmall).TextColor(t.TextMuted)
 					}
 					if r := a.restoreWaiting; r != nil {
 						ui.Column(c).Gap(8).Padding(12).Radius(8).Background(sunken(t)).Border(1, hairlines(t)).Children(func() {

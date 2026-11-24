@@ -7,8 +7,9 @@ separate stage window, and can publish that stage as an NDI source on
 macOS, Windows and Linux. The NDI feed draws the slide itself, so publishing
 needs no window on screen and one monitor is enough. The Go side is the whole app: package `main`
 builds the console plus on-demand stage, Song editor, Settings and Help
-windows with `github.com/egoist/mygo/ui`, and there is no network access,
-no database, and no web page in use.
+windows with `github.com/egoist/mygo/ui`, and there is no network access
+and no web page in use. The one database is `history.db`, a local SQLite
+file of song versions that never replaces the JSON library.
 
 The sign-in is a demo gate, not security: the account is the
 `demoUsername`/`demoPassword` pair in `main.go`, `signedIn` lives on
@@ -155,6 +156,21 @@ identity rules live in
   save the other copy as `backups/conflict-…json`). One machine edits at a
   time; there is no watcher, so a reload is the prompt or the **Reload**
   button.
+- **Version history is a local SQLite file, never the library.** `history.db`
+  holds one row per saved library (`history.go`, `history_sqlite.go`), with
+  the whole library as text, so a restore needs no replay. `openHistory` runs
+  in `WhenReady` and records the starting state; `saveNote` and the restores
+  call `noteHistory`, which arms one trailing timer (`historyEvery`, 5 s) so a
+  burst of typing is one version, and `flushHistory` skips a state already
+  stored by hash. The last 200 are kept. The **Version history** page
+  (`pageHistory`) lists them and asks before a restore, backing up the state
+  it replaces first. The store sits behind `historyStore`, so the app tests
+  use a fake; `history_sqlite_test.go` tests the real store and skips where
+  the native module cannot load (freebsd, or a development download that
+  failed). A module that does not load leaves history off with
+  `a.historyNote` and nothing else stops. Development and `go test` download
+  the native module once (2.2 MB, `~/Library/Caches/mygo/natives`); a
+  packaged build bundles it.
 - **Do not edit `src/mygo.ts` by hand.** It is `mygo generate` output, and
   the web frontend is currently unused (see "Known state").
 - **NDI output stays pure Go, and the binding lives in one file.**
@@ -246,6 +262,8 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `store.go` | `writeFileAtomic`, the one way a data file is replaced: a temporary file beside the target, a sync, a rename. |
 | `backup.go` | Backups and restores: `backupBytes` (songs and show in one bundle), `snapshotDaily` and `pruneBackups`, `snapshotNow` for a restore or a conflict, `decodeBackup` (a bundle, or a plain library file), `backUpSongs`, and `chooseRestore`/`confirmRestore`/`cancelRestore` with the restore question on the Settings page. |
 | `sync.go` | The songs folder: `chooseSongsFolder`/`confirmFolder`/`cancelFolder`, `useAppFolder`, `reloadLibrary`, and the note that says why a folder action did nothing. The write-side conflict guard lives in `library.go`. |
+| `history.go` | Version history: the `historyStore` interface, `openHistory`/`recordOpened`/`noteHistory`/`flushHistory`, the restore that asks first, and the `pageHistory` view. |
+| `history_sqlite.go` | The SQLite store behind that interface: `openSQLiteHistory`, the schema version and `revisions` table, add/recent/library/prune/close. |
 | `editor.go` | The Song editor window: `requestEditor`/`openEditorWindow`/`closeEditor`, the library card and search, the part/slide outline, the Slide/Song desk (`editorSlideDesk` with the preview, the text area and the header's **Remove part**, `editorSongDesk` with the details and the delete confirmation), `FocusBind` through `editorFocus`, `saveNote`/`editorRefused`, the New song and Paste words dialogs (`splitSlides`, `nextPartLabel`), and adding a song or part to the run of show. |
 | `slideview.go` | The shared slide renderer: `stageDesignWidth`/`Height`, `stageScale`, `slideMetrics`/`metricsFor`, and `slideBody`, used by the stage window, the NDI feed, the editor preview and the run of show's tiles. It draws the slide's text alone: the output carries no part label or song caption. |
 | `console.go` | The console view: top bar (including **Song editor** and the **Account** pane holding Settings, Check for Updates and Sign out), library (Songs/Bible tabs, search, pack picker), the run of show as a grid of whole-slide tiles grouped under each song (`deckGroups`, `deckGrid`, `deckTile`) with a go-live/move/remove toolbar per tile and drag-to-reorder on the picture (`deckDrag`, `dragLandsAfter`, `pendingDrop` applied by `settle`), the two-card stage/monitor panel with Go Live, and the login card. |
@@ -262,6 +280,8 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `store_test.go` | `writeFileAtomic`: replaces in one step, leaves no temporary file, keeps the old file when the write fails, creates the directory, and writes 0644. |
 | `backup_test.go` | The backup without a window or a dialog: bundle round-trip, a plain library accepted, a newer bundle refused, one daily snapshot per day (from a library save and from a show save), pruning to 14 and 20, the chosen file written, cancel and failure, restore asking before it changes anything, the safety copy, a plain library keeping the deck, a bad file refused, cancel, and the question answered on the Settings page. |
 | `sync_test.go` | The chosen folder: remembered in settings, a fresh folder taking the songs here, a folder's songs adopted, cancel, a bad library refused, a missing folder read-only, the app's folder taken back, a conflict reloaded or kept with the other copy saved, no question for this app's own writes, the Reload action, and the folder card and its question on the Settings page. |
+| `history_test.go` | Version history with a fake store: the starting state recorded once, a pause recording one version, the same content skipped, history off without a store, a restore that asks and backs up first, a missing version, the list page, the empty and off pages, a restore from the page, and Settings opening the page. |
+| `history_sqlite_test.go` | The real store: add and read back, newest first, prune, reopen, and a newer schema refused; skips where the native module cannot load. |
 | `data_test.go` | The built-in seeds: parts and slides, the All Creatures split, text-size defaults/clamps, slide counts, `findSong`. |
 | `slideview_test.go` | The shared renderer's scale and metrics at full and half width. |
 | `editor_test.go` | The editor headless: window lifecycle, console button, list/search/selection/width, tabs, typing (focus on open, song, slide and add; live preview; per-slide text; undo), save failures, split/duplicate/paste, part naming, part and slide guards (including removing a part or an empty part from the Slide tab), the song delete confirmation, new/remove/restore, add-to-show, and the deck staying a snapshot. |
@@ -293,8 +313,9 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 The web scaffold (`src/`, `index.html`, `vite.config.ts`, the `devUrl` and
 frontend settings in `mygo.config.ts`) and the `tick` event in
 `src/mygo.ts` predate the native UI and are unused. `dist/` is still built
-and embedded, but no window loads it. There is no undo/redo; the display
-and NDI preferences, the song library and the run of show survive a
-restart. These are recorded in
+and embedded, but no window loads it. A mistaken removal can be undone from
+the version history page or a backup, not with a keystroke: the display and
+NDI preferences, the song library, the run of show and song versions survive
+a restart. These are recorded in
 `docs/architecture.md` under "Known drift and gaps"; do not clean them up
 unasked.

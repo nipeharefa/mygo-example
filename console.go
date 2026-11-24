@@ -46,8 +46,8 @@ func (a *app) view(c *ui.Context) {
 	}
 	// Window shortcuts for the console. Text fields take the arrow keys
 	// first, so typing in the search box never moves the deck.
-	if a.page == pageSettings {
-		// The Settings page keeps only its own way out.
+	if a.page != pageConsole {
+		// The Settings and History pages keep only their own way out.
 		c.OnWindowShortcut(ui.Cmd, ui.KeyComma, a.showConsole)
 		c.OnWindowShortcut(ui.Ctrl, ui.KeyComma, a.showConsole)
 		c.OnWindowShortcut(ui.Cmd, ui.KeyEscape, a.showConsole)
@@ -132,6 +132,8 @@ func (a *app) shell(c *ui.Context) {
 		}
 		if a.page == pageSettings {
 			a.settingsBody(c)
+		} else if a.page == pageHistory {
+			a.historyBody(c)
 		} else {
 			// Stretch, because a Row centers its children vertically by
 			// default: the panels are content-height otherwise.
@@ -157,6 +159,8 @@ func (a *app) topBar(c *ui.Context) {
 			a.brandMark(c, textSection)
 			if a.page == pageSettings {
 				ui.Text(c, "Settings").FontSize(textBody).TextColor(t.TextMuted).SingleLine()
+			} else if a.page == pageHistory {
+				ui.Text(c, "Version history").FontSize(textBody).TextColor(t.TextMuted).SingleLine()
 			} else {
 				a.statusPill(c)
 			}

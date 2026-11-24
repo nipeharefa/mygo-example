@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -67,6 +69,24 @@ func TestWriteShots(t *testing.T) {
 			a.signedIn = true
 			a.page = pageSettings
 			a.view(c)
+		}},
+		{"settings-data", 1280, 1120, func(c *ui.Context) {
+			a := newApp()
+			a.signedIn = true
+			a.settingsDir = "/Users/you/Library/Application Support/mygo-demo"
+			a.libraryFolder = "/Users/you/Library/Mobile Documents/com~apple~CloudDocs/Church songs"
+			a.displays = []mygo.Display{{ID: 1, Label: "Built-in Retina Display", Primary: true}}
+			a.settingsBody(c)
+		}},
+		{"history", 1280, 900, func(c *ui.Context) {
+			a := newApp()
+			a.history = &fakeHistory{}
+			a.historyRows = []revision{
+				{ID: 3, At: time.Date(2026, 11, 25, 9, 12, 3, 0, time.Local), Note: "Part added", Songs: 5},
+				{ID: 2, At: time.Date(2026, 11, 22, 18, 4, 51, 0, time.Local), Note: "New song added", Songs: 5},
+				{ID: 1, At: time.Date(2026, 11, 22, 17, 0, 12, 0, time.Local), Note: "Opened", Songs: 4},
+			}
+			a.historyBody(c)
 		}},
 		{"login", 1280, 800, func(c *ui.Context) {
 			a := newApp()

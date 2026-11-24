@@ -4,7 +4,8 @@
 builds a run of show, a stage window that shows one slide at a time to the
 room, and Settings and Help windows opened on demand. Every window is
 rebuilt from one `app` struct, and the songs and the run of show are saved
-as JSON beside the preferences. This
+as JSON beside the preferences, with the last 200 versions of the songs in a
+local SQLite file. This
 document covers the state, the four windows, the theme split, the NDI path,
 and what the tests pin.
 
@@ -13,7 +14,8 @@ and what the tests pin.
 `main()` builds the `app` and waits for `mygo.App.WhenReady`. Inside that
 callback, in order, it resolves the app data directory
 (`mygo.App.Path(mygo.PathUserData)`), reads the display list, loads the
-saved settings, loads the song library and then the run of show, maps
+saved settings, loads the song library and then the run of show, opens the
+version history, maps
 `MYGO_NDI=1` onto the session's NDI preference, reads
 the packaged version, installs the application menu, subscribes to display
 changes, and then opens the console window with `mygo.NewWindow`:
@@ -23,15 +25,16 @@ changes, and then opens the console window with `mygo.NewWindow`:
 
 `mygo.App.OnQuit(a.stopNDI)` makes quitting the app unregister any NDI
 source, and `mygo.App.Run()` runs the main loop. There is no second
-process and no HTTP server; the files are `settings.json`, `library.json`
-and `show.json` in the app data directory.
+process and no HTTP server; the files are `settings.json`, `library.json`,
+`show.json` and the SQLite `history.db` in the app data directory.
 
 The console's view sets the console theme, draws the login card while
 `!a.signedIn`, and otherwise registers the console shortcuts and draws the
 shell. The stage is a separate `mygo.Window` created later by
 `openOutput`, with its own `ui.View(a.liveView)`; the Song editor is another
-window, created by `openEditorWindow`; Settings is a page of the console and
-Help is a further window, created by `openHelp`. Every window's view is a
+window, created by `openEditorWindow`; Settings and the **Version history**
+page belong to the console, and Help is a further window, created by
+`openHelp`. Every window's view is a
 pure builder, and `changed()` invalidates all of them.
 
 ## State
@@ -51,11 +54,15 @@ element or a context:
 | `folderNote string`, `folderNoteErr bool`, `folderWaiting *folderPlan` | the folder card's note, and the folder the Settings page is asking about |
 | `saveFile`, `openFile`, `askMessage` | the native dialogs, all nil in the app and stubbed in tests |
 | `backupDay string`, `backupNote string`, `backupNoteErr bool`, `restoreWaiting *restorePlan` | the day's snapshot is taken once, the Data card's note, and the backup the page is asking about |
+| `history historyStore`, `historyNote string` | the version store (SQLite in the app, a fake in tests) and why it is off when it cannot open |
+| `historyRows []revision`, `historyRowsErr string` | the list the page shows, read when the page opens and after a version lands |
+| `historyTimer *time.Timer`, `historyPending bool`, `historyWhat string`, `historyHash string` | the one trailing timer that turns a burst of edits into a version, the note it will store, and the hash of the last one |
+| `revisionWaiting int64` | the version the page is asking about; 0 is no question |
 | `blackout bool` | the stage shows a black frame, deck unchanged |
 | `nextID int` | slide id counter |
 | `menuOpen bool` | the Account pane in the top bar is open |
 | `pendingDrop *deckDrop` | a tile dropped in this frame, which `settle` applies after the build |
-| `win`, `live`, `editor`, `help *mygo.Window` | the console, stage, Song editor and Help windows; Settings is a page of the console |
+| `win`, `live`, `editor`, `help *mygo.Window` | the console, stage, Song editor and Help windows; Settings and Version history are pages of the console |
 | `songs []song` | the song library, loaded from `library.json` or seeded from `builtinSongs` |
 | `openEditor bool` | the current frame asked to open the Song editor after it is built |
 | `editSong`, `editPart`, `editSlide int` | what the Song editor has selected; −1 means nothing is selected |
@@ -66,7 +73,7 @@ element or a context:
 | `newSongTitle`, `newSongAuthor`, `newSongKey`, `newSongPart`, `newSongWords`, `pasteText string` | the dialogs' fields |
 | `displays []mygo.Display`, `stageDisplay int64` | the display list and the chosen stage display (0 = a window) |
 | `stageDisplayUsed int64` | the display the open stage was actually placed on |
-| `page int` | `pageConsole` or `pageSettings` |
+| `page int` | `pageConsole`, `pageSettings` or `pageHistory` |
 | `openStage`, `statsWanted bool` | what the current frame asked for: open the stage after it is built, keep the stats timer running |
 | `newWindow`, `mainScreen` | seams over `mygo.NewWindow` and `mygo.Screen.Displays`, so logic is testable without an application |
 | `ndiOn bool`, `ndi *ndiStream`, `ndiErr string` | NDI preference, sender and last error |
@@ -260,12 +267,15 @@ another display change from inside `openOutput`.
 Settings is a page of the console (`a.page = pageSettings`), reached from
 **Settings** in the **Account** pane, the **Cmd/Ctrl+,** shortcut or the
 menu, and left
-with **Back to console**, **Cmd/Ctrl+,** again or **Cmd/Ctrl+Esc**. While it
-is open the deck shortcuts (arrows, B, Enter) are not registered, so a
-keystroke cannot move the monitor behind the page. It shows the stage output
+with **Back to console**, **Cmd/Ctrl+,** again or **Cmd/Ctrl+Esc**. So is
+**Version history** (`pageHistory`), which shares that way out and adds
+**Back to settings**. While either page is open the deck shortcuts (arrows,
+B, Enter) are not registered, so a
+keystroke cannot move the monitor behind the page. Settings shows the stage output
 radios (**Windowed on this screen** plus one per display, each with label,
 role and size), the NDI switch and status line, the **NDI stream** stats,
-and a short data note. Choosing a display or toggling NDI saves
+the **Songs folder** card and the **Data** card (backup, restore and the
+version history). Choosing a display or toggling NDI saves
 immediately; a display change reopens an open stage on the new display.
 The **Stage output size** radios (720p, the default, or 1080p) go through
 `ndiResolutionChanged`, which saves and restarts a running sender at the
@@ -568,6 +578,39 @@ locally and a backups folder is one machine's history.
   **Reload** on the card pulls a saved file in while the app runs. The card
   says to edit on one machine at a time.
 
+### Version history
+
+The library's versions live in `history.db`, the only database in the app
+and never the library itself: a SQLite file beside the JSON, written by
+`history_sqlite.go` and kept behind the `historyStore` interface, so the
+tests run against a fake.
+
+- `openHistory` runs at startup after the library loads. It records the
+  starting state as `Opened`, unless the newest version already holds that
+  exact content, and remembers its hash in `a.historyHash`.
+- Every library save that succeeds calls `noteHistory` from `saveNote`, and
+  the restores and folder moves do the same. `noteHistory` stores the note
+  and arms one trailing timer of `historyEvery` (5 seconds), so a burst of
+  typing is one version, not one per key. `flushHistory` runs on the main
+  thread, skips a state whose hash is already stored, writes the whole
+  library as text, and prunes past `historyKeep` (200). Quitting flushes
+  what is pending and closes the store.
+- The **Version history** page (`pageHistory`, reached from Settings > Data)
+  lists the versions newest first with the time, the note ("Saved", "Part
+  added", "Opened", "Restored a version") and the song count. **Restore**
+  asks first, shows what would replace what, copies the current state into
+  `backups/before-history-…json`, applies the version, saves, and records
+  the restore as its own version.
+- `history.db` has `PRAGMA user_version = 1` and one `revisions` table (id,
+  time in unix milliseconds, kind, note, song count, hash, library text). A
+  file from a newer version is refused and the app runs with history off.
+- The native module is the one thing here that is not pure Go: it is Zig,
+  bundled into a packaged app and downloaded once into
+  `~/Library/Caches/mygo/natives` for `go run` and `go test`. If it cannot
+  load (freebsd, or no download), `openHistory` records the reason in
+  `a.historyNote`, the page says history is off, and every other feature
+  works.
+
 ## Rendering details worth knowing
 
 - Widget state that must persist between passes is listed in `app`:
@@ -638,6 +681,13 @@ tests must not press **Open output**).
   folder taken back, a conflict reloaded and a conflict kept with the other
   copy saved, no question for this app's own writes, **Reload**, and the
   folder card with its question.
+- `history_test.go` — the starting state recorded once, one version per
+  pause, the same content skipped, history off without a store, a restore
+  that asks and backs up first, a missing version, the list, empty and off
+  pages, a restore from the page, and Settings opening it.
+- `history_sqlite_test.go` — the real store round-trip, newest first,
+  pruning, reopening, and a newer schema refused; it skips where the native
+  module cannot load, as the NDI tests skip without a runtime.
 - `slideview_test.go` — `stageScale` and the metrics at full and half width.
 - `editor_test.go` — the editor window lifecycle (request, settle, close,
   sign-out, `changed()` nil-safety), the console button, empty and filtered
@@ -742,9 +792,9 @@ agent session, prefix Go commands with `GOCACHE="$TMPDIR/gocache-mygo-demo"`.
   is a button or a menu item.
 - **One stage window and one monitor.** Opening the stage again focuses
   the existing one; there is no multi-output or per-display preview feature.
-- **No undo/redo.** A mistaken removal in the editor or the deck can be
-  recovered only from the `backups/` folder or by hand. One bundle a day is
-  kept, 14 days.
+- **No undo/redo.** A mistaken removal is recovered from the **Version
+  history** page or the `backups/` folder, not with a keystroke. The
+  history holds the songs, not the run of show.
 - **Sync is a folder, not a service.** Two machines share `library.json`
   through iCloud Drive or Dropbox, one at a time; the run of show does not
   travel. There is no watcher, so a file changed while the app is open is

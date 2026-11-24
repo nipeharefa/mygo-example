@@ -7,7 +7,8 @@ while one slide goes to a separate stage window, and can publish that stage
 as an NDI video source for OBS or a projector feed — with no window on
 screen, so one monitor is enough. A separate **Song editor** window edits
 the song library itself: parts, slides, text and text size. Everything stays on the machine: no
-account, no network, no database.
+account and no network, with one local database that keeps the last 200
+versions of the songs.
 
 Sign in with **admin** / **admin**. The sign-in is a demo gate, not
 security.
@@ -117,6 +118,13 @@ so a chorus can follow every verse without another copy of the song.
 The run of show keeps the words it was given: editing a slide later does not
 rewrite a slide already added. Add the song again to use the new words.
 
+**Text size** is one number per song, in stage units at the 1280×720 design:
+40 is the built-in size and the slider spans 24 to 72. The editor's 16:9
+preview, the stage window and the NDI feed all scale from that number, so a
+smaller output shrinks the text with it instead of clipping it. A slide
+copies its size when it is added, so changing a song later does not rewrite
+slides already in the run of show.
+
 ## Backing up and syncing
 
 Settings > Data keeps the work safe without a Save button.
@@ -145,15 +153,14 @@ copy loses is saved in `backups` as a conflict file, not thrown away.
 **Reload** on the card pulls in a file another machine saved while this one
 was open.
 
-The same folder holds `library.json`, the songs, and `show.json`, the run of
-show. Both are plain JSON, so they can be read and copied without the app.
-
-**Text size** is one number per song, in stage units at the 1280×720 design:
-40 is the built-in size and the slider spans 24 to 72. The editor's 16:9
-preview, the stage window and the NDI feed all scale from that number, so a
-smaller output shrinks the text with it instead of clipping it. A slide
-copies its size when it is added, so changing a song later does not rewrite
-slides already in the run of show.
+The songs and the run of show are plain JSON, so they can be read and copied
+without the app. Settings > Data also opens **Version history**: the app
+saves a version of the songs whenever editing pauses, keeps the last 200,
+and lists them newest first. **Restore** puts one back after asking, and the
+state it replaces is copied into `backups` first. The versions live in
+`history.db`, a local SQLite file, which is the one thing here that is not
+JSON. Where the database module cannot load, the page says history is off
+and everything else works.
 
 ## The live output as an NDI source
 

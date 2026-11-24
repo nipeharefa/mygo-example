@@ -88,6 +88,19 @@ type app struct {
 	folderNoteErr  bool
 	folderWaiting  *folderPlan
 
+	// Version history: the local store, the list the page shows, the one
+	// trailing timer that turns a burst of edits into one version, and the
+	// version the page is asking about.
+	history         historyStore
+	historyNote     string
+	historyRows     []revision
+	historyRowsErr  string
+	historyTimer    *time.Timer
+	historyPending  bool
+	historyWhat     string
+	historyHash     string
+	revisionWaiting int64
+
 	win  *mygo.Window
 	live *mygo.Window
 
@@ -217,6 +230,7 @@ func (a *app) signOut() {
 	a.newSongOpen, a.pasteOpen, a.confirmRemoveSong = false, false, false
 	a.restoreWaiting = nil
 	a.folderWaiting = nil
+	a.revisionWaiting = 0
 	a.folderNote, a.folderNoteErr = "", false
 	a.backupNote, a.backupNoteErr = "", false
 }
@@ -366,6 +380,7 @@ func (a *app) ndiLabel() string {
 const (
 	pageConsole = iota
 	pageSettings
+	pageHistory
 )
 
 // The sizes the feed publishes at, in the order Settings offers them.
@@ -400,6 +415,7 @@ func main() {
 		a.loadSettings()
 		a.loadLibrary()
 		a.loadShow()
+		a.openHistory()
 		if os.Getenv("MYGO_NDI") != "" {
 			// Session-only override: publish without rewriting the preference.
 			a.ndiOn = true
@@ -424,6 +440,7 @@ func main() {
 		a.tickStats()
 	})
 	mygo.App.OnQuit(a.stopNDI)
+	mygo.App.OnQuit(a.closeHistory)
 	mygo.App.OnQuit(cancel)
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

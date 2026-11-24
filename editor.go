@@ -717,6 +717,7 @@ func (a *app) saveNote(note string, console bool) {
 	} else {
 		a.editorStatus = note
 		a.editorStatusErr = false
+		a.noteHistory(note)
 	}
 	a.editorRedraw(console)
 }

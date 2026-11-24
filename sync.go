@@ -91,6 +91,7 @@ func (a *app) confirmFolder() {
 	a.folderWaiting = nil
 	a.folderNote = "Songs are saved in " + p.Dir + "."
 	a.folderNoteErr = false
+	a.noteHistory("Made a songs folder")
 	a.saveSettings()
 	a.changed()
 }
@@ -124,6 +125,7 @@ func (a *app) useAppFolder() {
 	}
 	a.folderNote = "Songs are saved in the app's own folder."
 	a.folderNoteErr = false
+	a.noteHistory("Moved the songs back")
 	a.saveSettings()
 	a.changed()
 }
@@ -154,6 +156,7 @@ func (a *app) reloadLibrary() {
 	a.libraryBlocked = false
 	a.folderNote = "Reloaded " + songCount(len(a.songs)) + " from the songs folder."
 	a.folderNoteErr = false
+	a.noteHistory("Reloaded the songs folder")
 	a.changed()
 }
 
