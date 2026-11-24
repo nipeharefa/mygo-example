@@ -39,6 +39,29 @@ func TestWriteShots(t *testing.T) {
 			a.blackout = true
 			a.view(c)
 		}},
+		// The monitor on a row that is not on air: selection has to read
+		// without the LIVE badge, since the row no longer carries one.
+		{"console-monitor-away", 1280, 800, func(c *ui.Context) {
+			a := newApp()
+			a.signedIn = true
+			a.preview = 2
+			a.view(c)
+		}},
+		// A song that comes back later heads its own group again.
+		{"console-repeated-song", 1280, 800, func(c *ui.Context) {
+			a := newApp()
+			a.signedIn = true
+			a.addSong("amazing-grace")
+			a.preview = 0
+			a.view(c)
+		}},
+		// The account pane: app actions out of the bar, in one card.
+		{"console-account-pane", 1280, 800, func(c *ui.Context) {
+			a := newApp()
+			a.signedIn = true
+			a.menuOpen = true
+			a.view(c)
+		}},
 		{"console-settings", 1280, 800, func(c *ui.Context) {
 			a := newApp()
 			a.signedIn = true

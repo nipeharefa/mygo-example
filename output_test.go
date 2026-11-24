@@ -22,8 +22,9 @@ func mustStage(t *testing.T, a *app) slide {
 	return s
 }
 
-// The output shows the selected slide, with its caption under it.
-func TestLiveViewShowsCurrentSlide(t *testing.T) {
+// The output shows the slide's words, not the part label or the song's
+// details: the room reads the lyric and nothing else.
+func TestLiveViewShowsWordsOnly(t *testing.T) {
 	a := newApp()
 	tt := testLive(a)
 	s := mustStage(t, a)
@@ -31,8 +32,11 @@ func TestLiveViewShowsCurrentSlide(t *testing.T) {
 	if !tt.HasText(s.firstLine()) {
 		t.Fatalf("the live view does not show %q: %q", s.firstLine(), tt.Texts())
 	}
-	if !tt.HasText(s.caption()) {
-		t.Fatalf("the live view does not show the caption %q", s.caption())
+	if tt.HasText(s.caption()) {
+		t.Fatalf("the live view still shows the caption: %q", tt.Texts())
+	}
+	if tt.HasText("VERSE 1") {
+		t.Fatalf("the live view still shows the part label: %q", tt.Texts())
 	}
 }
 
@@ -57,7 +61,7 @@ func TestLiveViewBlackoutHidesText(t *testing.T) {
 
 	a.toggleBlackout()
 	tt.Frame()
-	if tt.HasText(s.firstLine()) || tt.HasText(s.caption()) {
+	if tt.HasText(s.firstLine()) || tt.HasText("VERSE 1") {
 		t.Fatalf("blackout still shows slide text: %q", tt.Texts())
 	}
 }

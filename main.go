@@ -54,7 +54,11 @@ type app struct {
 	stage    int // the row on air
 	blackout bool
 	nextID   int
-	deckList ui.ListState
+	// pendingDrop is a tile dropped in the frame just built, applied by
+	// settle once the build is done: ui.Drop delivers during the build.
+	pendingDrop *deckDrop
+	// menuOpen shows the account pane in the top bar.
+	menuOpen bool
 
 	win  *mygo.Window
 	live *mygo.Window
@@ -160,6 +164,7 @@ func (a *app) signOut() {
 	a.closeEditor()
 	a.openEditor = false
 	a.page = pageConsole
+	a.menuOpen = false
 	a.signedIn = false
 	a.password = ""
 	a.authErr = ""
@@ -203,6 +208,12 @@ func (a *app) requestStage() {
 // Context.After while openStage is set) so the console draws the frame it
 // asked for before a new window works takes the main thread.
 func (a *app) settle() {
+	// A dropped tile reorders the deck after the frame is built, so the
+	// build that saw the drop stays a function of the state it read.
+	if d := a.pendingDrop; d != nil {
+		a.pendingDrop = nil
+		a.dropSlide(*d)
+	}
 	if a.openEditor {
 		a.openEditor = false
 		if a.win != nil && a.editor == nil {

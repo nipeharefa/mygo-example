@@ -42,9 +42,11 @@ element or a context:
 | `signedIn`, `username`, `password`, `authErr` | the demo gate |
 | `tab` | 0 = Songs, 1 = Bible |
 | `songQuery`, `verseQuery`, `pack` | library filters; `pack` is the selected verse pack name |
-| `deck []slide`, `preview int`, `stage int` | the run of show, the row selected in the monitor, and the row on air |
+| `deck []slide`, `preview int`, `stage int` | the run of show, the tile selected in the monitor, and the slide on air |
 | `blackout bool` | the stage shows a black frame, deck unchanged |
-| `nextID int`, `deckList ui.ListState` | slide id counter and the list's persistent state |
+| `nextID int` | slide id counter |
+| `menuOpen bool` | the Account pane in the top bar is open |
+| `pendingDrop *deckDrop` | a tile dropped in this frame, which `settle` applies after the build |
 | `win`, `live`, `editor`, `help *mygo.Window` | the console, stage, Song editor and Help windows; Settings is a page of the console |
 | `songs []song` | the song library, loaded from `library.json` or seeded from `builtinSongs` |
 | `openEditor bool` | the current frame asked to open the Song editor after it is built |
@@ -67,7 +69,7 @@ element or a context:
 seeds the deck with Amazing Grace and Psalm 23:1, so a fresh run has
 something to show. `slide` carries an ID (`s1`, `s2`, …), a title, a section
 label, the text, a text size and a kind (`slideSong` or `slideVerse`);
-`caption`, `eyebrow` and `firstLine` derive the strings the views need. A
+`caption` names it in the console and `firstLine` opens it in lists. A
 song is `{ID, Title, Author, Key, TextSize, Parts []songPart}`, and a part
 is `{Label, Slides []string}`: the label becomes the slide's section, and
 each slide string is one stage frame.
@@ -76,12 +78,18 @@ Every mutation goes through a method on `app` (`addSong`, `addVerse`,
 `selectSlide`, `nextSlide`, `prevSlide`, `takeSlide`, `nextStage`,
 `prevStage`, `removeSlide`, `moveSlide`, `toggleBlackout`, `setNDI`, …) and
 ends in `changed()`, which invalidates every open window. The monitor
-methods move `a.preview` only; `takeSlide` copies the monitor row to the
-stage, and the stage's own next/prev pull the monitor along so the
+methods move `a.preview` only; `takeSlide` copies the monitor tile's slide
+to the stage, and the stage's own next/prev pull the monitor along so the
 highlight follows the room. `nextSlide`/`prevSlide` clamp at the ends;
-`removeSlide` repairs the stage index when the removed row was on air or
+`removeSlide` repairs the stage index when the removed slide was on air or
 above it; `moveSlide` swaps and remaps the stage so the on-air content does
 not change.
+
+A tile's own controls reach the same methods by slide index instead of by
+the monitor: `takeSlideAt`, `moveSlideAt` and `removeSlideAt` each pull
+`a.preview` to that slide first, so the tile an operator clicks is the
+slide that moves, goes live or goes away, whatever the monitor was on. The
+stage-window keys and Cmd/Ctrl+Enter keep the monitor-based entry points.
 
 ## The frame contract
 
@@ -93,16 +101,19 @@ Views are pure builders with the same rules as any MyGo app:
 - Callbacks (`OnClick`, `OnSubmit`, `OnChange`, `OnShortcut`) run before
   the rebuild; they mutate `app` and call `changed()`. They never call into
   the build.
-- `ui.List` identity comes from `deckList.Key`, a slide ID, not the row
-  index, so the same song can appear twice and removal does not confuse
-  selection. `deckList.Selected = &a.preview` is pointed at the monitor row
-  every pass, and the row label is what `ui.NewTester` and accessibility
-  see. The list's `OnSubmit` takes the slide, so Enter and a double click
-  both go live.
-- Shortcuts fall through: the focused list consumes Enter and the arrows,
-  so the console's root ← / → handlers only fire when the list is not
-  focused. `c.OnWindowShortcut` handles Cmd/Ctrl+Enter and B everywhere,
-  and a focused text field consumes its keys first.
+- The run of show is not a `ui.List`: it is a plain scroll of tiles with
+  song headers between them, so `deckGroups` derives the headers from the
+  deck on every pass and nothing about the grouping is stored. A tile's
+  label (`Slide 3: Amazing Grace · Verse 3`) is what `ui.NewTester` and
+  accessibility see, and the slide's ID is its `Key` on each control, so
+  the same song can appear twice without confusing either.
+- Shortcuts fall through: the console registers ← / → / B on the root and
+  Enter, Cmd/Ctrl+Enter and Cmd/Ctrl+, on the window. A focused button or
+  text field takes Enter first, so pressing it there presses that control,
+  not the run of show; with the focus anywhere else, Enter takes the
+  monitor row. Tiles themselves are clickable but not focusable: the arrows
+  already move the monitor, and each tile's toolbar is the keyboard path to
+  its actions.
 - A `ui.Row` centers its children vertically by default; the console's
   three-column row sets `.AlignItems(ui.Stretch)` so the panels fill the
   height.
@@ -130,20 +141,51 @@ the three-column body.
   status pill (`PREVIEW`, `BLACK` or `LIVE`), then transport buttons. When
   no output is open it shows **Open output**; once open it shows
   **Present**/**Exit full screen**, **Close output**, and the NDI toggle
-  (only where `ndiSupported()`). **Sign out** is always last.
+  (only where `ndiSupported()`). Then **Song editor**, and last the
+  **Account** pane (`accountMenu`): a `ui.Popover` holding **Settings**,
+  **Check for Updates** and **Sign out**. They live together so the bar
+  stays about the service, and in the window rather than only in the menu
+  bar, which Windows and Linux do not have; Escape or a click outside
+  closes it.
 - **Library** (296 wide, `Surface`) — `ui.Tabs` Songs/Bible. Songs has a
   search box and a scrolling list of `songRow`s with an **Add** button
   whose accessible label is `Add <title>`. Bible has a search box, the
   verse-pack `ui.Select`, and `verseRow`s with `Add <ref>` buttons.
-- **Run of show** (grow) — heading, slide count, and **Move up** /
-  **Move down** / **Remove** (disabled where they cannot act), then either
-  an empty state or the `ui.List` of `deckRow`s. A row shows its position,
-  the title, and a second line: for a song slide the part label and the first
-  line (`Verse 1 · ...`), for a verse just the first line. Clicking it selects
-  the slide.
+- **Run of show** (grow) — a heading over the slide count, then either an
+  empty state or a scrolling grid of slide tiles, full width inside the
+  well (`deckInset`). The deck is grouped into runs of the same song: a
+  header (`Amazing Grace` · `3 slides` · a hairline) opens each run, and a
+  song that comes back later heads its own group again, because the deck is
+  the service order. `deckGroups` splits it; `deckGrid` fits as many tiles
+  per row as the well allows at `deckTileMin` (three at 1280, two at the
+  1040 minimum) and shares the width among them. A tile is the whole slide
+  drawn through `slideBody` and `metricsFor` at the tile's size, in the
+  stage theme: its text alone, the room's slide made small rather than a
+  second sketch of it. Under it: its position, its part
+  (`Verse 1`), a `LIVE` badge (or `BLACK` while blacked out) and a
+  `ui.Toolbar` of glyph buttons: **▶** go live, **↑** / **↓** move, **✕**
+  remove. Glyphs because four text buttons would not fit a tile; each
+  carries an accessible name (`Go live slide 3`) and a stable `Key` with
+  the slide id (`deck-take-s3`), which automation drives without an index.
+  The toolbar stays faceless until hovered or focused, so a grid of tiles
+  is not a grid of chips. Clicking a tile selects it for the monitor; the
+  tile on air carries the copper frame, and selection is the tile's tint
+  and edge.
+- **Dragging a tile** — the picture is the handle (`Drag(deckDrag{from})`,
+  grab cursor): MyGo starts a drag from the element a press is in, so a
+  press on **▶** / **✕** beside it is never a drag, and a press that moves
+  nothing is still a click. Every tile takes the dragged picture
+  (`ui.DragOver` / `ui.Drop`); the half under the pointer decides the side,
+  and a 2px accent bar on that edge shows where the slide will land. A
+  drop is recorded in `pendingDrop` during the build and applied by
+  `settle` after it, because `ui.Drop` delivers during the build: the frame
+  that saw the drop still read the deck it started with. `dropSlide` lands
+  the slide and `reorderSlides` keeps the stage on its slide by ID; the
+  groups re-derive, so a slide dropped into another song's run heads its
+  own group there.
 - **Stage panel** (344 wide, `Surface`) — two 16:9 cards drawn in the
   stage theme: **STAGE · LIVE** (what the room sees, with `n / total`) and
-  **MONITOR · PREVIEW** (the row selected in the run of show), then **Go
+  **MONITOR · PREVIEW** (the tile selected in the run of show), then **Go
   Live**, **Prev** / **Next** (which move the monitor), **Black out** /
   **Clear black out**, and a shortcut hint. The panel scrolls, so it still
   fits on a short window.
@@ -172,7 +214,7 @@ their keys while focused, so typing in a search box does not move the deck.
   a fullscreen transition cannot leave it on the wrong display.
 
 `liveView` draws a black fill while `a.blackout`, and otherwise the
-stage slide (`a.stageSlide()`, not the monitor row) as a centered slide (eyebrow, 40 pt text, caption) on the forced-dark stage theme. Its
+stage slide (`a.stageSlide()`, not the monitor row) as its text alone, centered at the song's size on the forced-dark stage theme. Its
 shortcuts are → ↓ Space next, ← ↑ prev, B blackout, and Esc, which clears
 fullscreen when `a.live.IsFullScreen()` and closes the output otherwise —
 the only way out of a window with no title bar.
@@ -204,7 +246,8 @@ another display change from inside `openOutput`.
 ### Settings
 
 Settings is a page of the console (`a.page = pageSettings`), reached from
-the **Settings** button, the **Cmd/Ctrl+,** shortcut or the menu, and left
+**Settings** in the **Account** pane, the **Cmd/Ctrl+,** shortcut or the
+menu, and left
 with **Back to console**, **Cmd/Ctrl+,** again or **Cmd/Ctrl+Esc**. While it
 is open the deck shortcuts (arrows, B, Enter) are not registered, so a
 keystroke cannot move the monitor behind the page. It shows the stage output
@@ -258,7 +301,7 @@ size when added, so later edits do not rewrite what is already on the list.
 
 ### Updates
 
-**Check for Updates** is a button on the console, and the same button on the
+**Check for Updates** is a row in the **Account** pane, and a button on the
 help page, because the application menu is macOS-only: MyGo marks the Help
 menu role as macOS-only, and a Windows or Linux install shows no menu bar at
 all. The button runs `checkForUpdates`: the feed is asked on a
@@ -387,18 +430,19 @@ least one part; `data_test.go` and `deck_test.go` assert these.
 ## Rendering details worth knowing
 
 - Widget state that must persist between passes is listed in `app`:
-  `tab`, `pack`, `deckList`, `songQuery`, `verseQuery`, `preview`, `stage`,
-  `blackout`, plus the settings fields. Everything else is rebuilt from
-  data.
+  `tab`, `pack`, `songQuery`, `verseQuery`, `preview`, `stage`, `blackout`,
+  plus the settings fields. Everything else is rebuilt from data, including
+  the run of show's groups.
 - `ui.SearchField` only exposes its hint as a placeholder, so both search
   boxes also call `.Label(...)`; that label is what the tests click.
 - Buttons that act on a row carry a per-row accessible label (`Add
   Amazing Grace`, `Add Psalm 23:1`) while their visible text stays short.
-- The console's two stage cards skip `slideBody` and draw a stylized
-  thumbnail; the stage window, the NDI feed and the editor preview all go
-  through `slideBody` with `metricsFor`, so those three agree. A row on air
-  carries a `LIVE` badge, so the run of show shows what the room sees
-  without a second look.
+- The stage window, the NDI feed, the editor preview and the run of show's
+  tiles all go through `slideBody` with `metricsFor`, so the whole app draws
+  a slide the same way. The console's two stage cards draw their own
+  fixed-size text instead, because they are read at arm's length. A tile on
+  air carries the copper frame and a `LIVE` badge, so the run of show shows
+  what the room sees without a second look.
 - Disabled, not hidden, is the pattern for transport that cannot act
   (empty deck, first/last slide), so the layout does not jump.
 
@@ -411,9 +455,12 @@ tests must not press **Open output**).
 - `view_test.go` — login gate, wrong-password error and its clearing,
   demo-account sign-in, Enter-to-submit, sign-out, library rows, adding a
   song, adding a verse from the Bible tab, search filtering, monitor vs
-  stage (click, Go Live, Enter, Cmd+Enter), arrow shortcuts (and that
-  arrows in a text field do not move the deck), the blackout button, and
-  the two empty states.
+  stage (click, Go Live, Enter, Cmd+Enter), the tiles wrapping from three
+  columns to two at the minimum width, the song headers and their counts
+  (including a repeated song), a tile's own go-live/move/remove acting on
+  that tile, arrow shortcuts (and that arrows in a text field do not move
+  the deck), the
+  blackout button, and the two empty states.
 - `data_test.go` — every built-in song has parts and slides, All Creatures'
   verse keeps its two slides, a missing or out-of-range text size clamps to
   40/24–72, `slideCount`, and `findSong`.
@@ -421,8 +468,9 @@ tests must not press **Open output**).
   slide ids, part expansion (including blank-slide skipping and the text
   size snapshot), single-part adds, unknown ids, monitor clamping, take,
   stage next/prev, removal from and above the stage, reorder without
-  changing what is on air (single rows, multi-row drags, and `to` as a
-  gap), `Move up`/`Move down` going through the same reorder, blackout,
+  changing what is on air (single rows, blocks of rows, and `to` as a
+  gap), `Move up`/`Move down` going through the same reorder, the tile's
+  own indexed take/move/remove, blackout,
   `stageSlide`/`previewSlide`/`upcomingSlide`, and `changed()` with no
   windows attached.
 - `library_test.go` — library round-trip, version and duplicate rejection,
@@ -522,7 +570,7 @@ agent session, prefix Go commands with `GOCACHE="$TMPDIR/gocache-mygo-demo"`.
   Wayland and a closed stage all work. A sandboxed agent session still
   cannot eyeball the feed in OBS or NDI Video Monitor.
 - **The console shortcuts are small.** ← / → for the monitor, B for
-  blackout, Cmd/Ctrl+Enter to go live, Enter on the list; everything else
+  blackout, Enter and Cmd/Ctrl+Enter to go live; everything else
   is a button or a menu item.
 - **One stage window and one monitor.** Opening the stage again focuses
   the existing one; there is no multi-output or per-display preview feature.

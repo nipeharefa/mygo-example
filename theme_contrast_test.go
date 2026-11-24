@@ -45,9 +45,11 @@ func TestThemeContrast(t *testing.T) {
 			}{
 				{"text on background", theme.Text, theme.Background},
 				{"text on surface", theme.Text, theme.Surface},
+				{"text on a hovered row", theme.Text, theme.SurfaceHover},
 				{"muted on background", theme.TextMuted, theme.Background},
 				{"muted on surface", theme.TextMuted, theme.Surface},
 				{"muted on a raised row", theme.TextMuted, raisedRow(theme)},
+				{"muted on the selected row", theme.TextMuted, rowSelected(theme)},
 				{"muted on the well", theme.TextMuted, sunken(theme)},
 				{"accent on background", theme.Accent, theme.Background},
 				{"text on accent", theme.AccentText, theme.Accent},

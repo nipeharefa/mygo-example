@@ -31,32 +31,36 @@ The builds are not signed. On macOS, right-click the app and choose
 
 The window is the **console**: the song and Bible library on the left,
 the run of show in the middle, and the stage panel on the right. The panel
-shows the **stage** (what the room sees) above the **monitor** (the row you
+shows the **stage** (what the room sees) above the **monitor** (the tile you
 are looking at). Moving the monitor never changes the room until you press
 **Go Live**.
 
-1. Sign in. A fresh session starts with Amazing Grace and Psalm 23:1 on
-   the list.
+1. Sign in. A fresh session starts with Amazing Grace and Psalm 23:1 in
+   the run of show.
 2. Add songs from **Songs** and verses from **Bible**. Adding a song puts
-   every part's slides in the list, in order; the search boxes and the pack
-   picker narrow the library, not the list.
-3. Click a row, use **←** / **→**, or press **Next** / **Prev** to move the
-   monitor. Press **Go Live**, **Enter** on the list, or **Cmd/Ctrl+Enter**
-   to put that row on stage. The row on air carries a `LIVE` badge.
-4. Drag a row to move it, or use **Move up** / **Move down**; the slide on
-   air stays on air wherever its row lands. **Remove** drops the selected
-   row, and **Black out** hides the text without touching the list.
+   every part's slides in the run of show, in order; the search boxes and
+   the pack picker narrow the library, not the run of show.
+3. Click a tile, use **←** / **→**, or press **Next** / **Prev** to move
+   the monitor. Press **Go Live**, **Enter**, or **Cmd/Ctrl+Enter** to put
+   that slide on stage, or press the tile's **▶** to send just that slide.
+   The tile on air carries a copper frame and a `LIVE` badge.
+4. Every slide is a tile, every song heads its own group. Drag a slide by
+   its picture onto another tile, on the half where it should land, or use
+   its **↑** / **↓**; either keeps it on air wherever its slide lands. The
+   tile's **✕** drops it, and **Black out** hides the text without touching
+   the deck. The tile shows the whole slide as the room will see it.
 5. **Open output** opens the stage window. It is a 1280×720 window unless
    **Settings** names a display, in which case it opens fullscreen there.
    **Present** toggles fullscreen, **Close output** closes it. On one
    monitor, skip the window altogether: turn on NDI instead, and OBS or
    NDI Video Monitor shows the stage while the console keeps the keyboard.
-   The **Settings** page (Cmd/Ctrl+, or the button in the top bar) also
-   holds the NDI switch, the output size and the stream's own stats; the
-   **Help** menu lists the shortcuts and the NDI setup.
+   The **Settings** page (Cmd/Ctrl+, or **Settings** in the **Account**
+   pane at the end of the bar) also holds the NDI switch, the output size
+   and the stream's own stats; the **Help** menu lists the shortcuts and
+   the NDI setup.
 
-The console shortcuts are **←** / **→** for the monitor, **B** for blackout,
-and **Cmd/Ctrl+Enter** to go live. In the stage window **← → ↑ ↓** and
+The console shortcuts are **←** / **→** for the monitor, **Enter** or
+**Cmd/Ctrl+Enter** to go live, and **B** for blackout. In the stage window **← → ↑ ↓** and
 **Space** move the stage (pulling the monitor along), **B** toggles blackout,
 and **Esc** leaves fullscreen; when the stage is windowed, **Esc** closes
 it. The stage window has no title bar, so drag the slide itself to move it
@@ -70,7 +74,7 @@ The display and NDI preferences and the song library are saved between
 runs; the run of show is not. A saved display that is no longer attached
 falls back to a window.
 
-**Check for Updates** (a button on the console, and on the Help page) asks
+**Check for Updates** (in the **Account** pane, and on the Help page) asks
 GitHub for the newest release and offers
 to install it; the app then restarts on the new version. Updates work only
 for the installers from a release — a development build, or an install a

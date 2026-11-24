@@ -18,42 +18,30 @@ func stageScale(width float32) float32 {
 	return width / stageDesignWidth
 }
 
-// slideMetrics are the sizes a slide body draws at: eyebrow, letter spacing,
-// body text, caption and the padding around them.
+// slideMetrics are the sizes a slide draws at: its text and the padding
+// around it. The room sees the words alone: no part label, no song caption.
 type slideMetrics struct {
-	Eyebrow, Letter, Text, Caption, PadX, PadY float32
+	Text, PadX, PadY float32
 }
 
 // metricsFor scales the design sizes to a canvas width and pulls the chosen
 // body size into the slider's range.
 func metricsFor(width float32, textSize float64) slideMetrics {
 	s := stageScale(width)
-	size := float32(clampTextSize(textSize))
 	return slideMetrics{
-		Eyebrow: 15 * s,
-		Letter:  2.6 * s,
-		Text:    size * s,
-		Caption: 17 * s,
-		PadX:    72 * s,
-		PadY:    84 * s,
+		Text: float32(clampTextSize(textSize)) * s,
+		PadX: 72 * s,
+		PadY: 84 * s,
 	}
 }
 
-// slideBody draws the three lines of a slide. The caller owns the background,
-// padding, centering and the drag handle, so the stage and the editor preview
-// differ only in the metrics and colors they pass. Colors are explicit because
-// the editor preview sits in a console window: it must look like the stage
-// without changing the window's theme.
+// slideBody draws the slide's text, centered. The caller owns the
+// background, padding, centering and the drag handle, so the stage, the NDI
+// feed, the editor preview and the run of show's tiles differ only in the
+// metrics and colors they pass. Colors are explicit because previews sit in
+// a console window: they must look like the stage without changing the
+// window's theme.
 func slideBody(c *ui.Context, s slide, m slideMetrics, t *ui.Theme) {
-	// The eyebrow is a label the room reads once, so it is set small and
-	// spaced: it names the verse without competing with it.
-	ui.Text(c, s.eyebrow()).FontSize(m.Eyebrow).FontWeight(700).LetterSpacing(m.Letter).
-		TextColor(t.Accent).TextAlign(ui.Center).SingleLine()
-	// The block hangs a little above center so the caption has air under the
-	// last line instead of touching it.
-	ui.Column(c).Padding(0, m.PadY*0.22).Children(func() {
-		ui.Text(c, s.Text).FontSize(m.Text).LineHeight(1.32).TextAlign(ui.Center).TextColor(t.Text)
-	})
-	ui.Text(c, s.caption()).FontSize(m.Caption).TextColor(t.TextMuted).TextAlign(ui.Center).
-		Padding(0, m.PadY*0.34, 0, 0)
+	ui.Text(c, s.Text).FontSize(m.Text).LineHeight(1.32).
+		TextAlign(ui.Center).TextColor(t.Text)
 }

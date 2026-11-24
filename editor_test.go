@@ -90,19 +90,19 @@ func TestEditorSelectsSong(t *testing.T) {
 	}
 }
 
-func TestEditorPreviewShowsSlideParts(t *testing.T) {
+func TestEditorPreviewShowsTheSlideOnly(t *testing.T) {
 	a := newApp()
 	a.selectSong(0)
 	tt := ui.NewTester(a.editorView, editorWidth, editorHeight)
 	line := (slide{Text: a.songs[0].Parts[0].Slides[0]}).firstLine()
-	if !tt.HasText("VERSE 1") {
-		t.Errorf("preview has no eyebrow: %q", tt.Texts())
-	}
 	if !tt.HasText(line) {
 		t.Errorf("preview has no first line %q", line)
 	}
-	if !tt.HasText("Amazing Grace · Verse 1") {
-		t.Errorf("preview has no caption: %q", tt.Texts())
+	if tt.HasText("VERSE 1") {
+		t.Errorf("preview still shows the part label: %q", tt.Texts())
+	}
+	if tt.HasText("Amazing Grace · Verse 1") {
+		t.Errorf("preview still shows the caption: %q", tt.Texts())
 	}
 }
 

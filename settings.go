@@ -161,6 +161,7 @@ func stageDisplayFound(displays []mygo.Display, id int64) (mygo.Display, bool) {
 // showSettings brings the Settings page of the console forward.
 func (a *app) showSettings() {
 	a.page = pageSettings
+	a.menuOpen = false
 	if a.win != nil {
 		a.win.Focus()
 	}

@@ -65,10 +65,13 @@ identity rules live in
   selects on the stream's stop channel, so Stop never waits for a draw.
 - **The monitor never reaches the room by itself.**
   `selectSlide`/`nextSlide`/`prevSlide` move `a.preview`; only
-  `takeSlide` (Go Live, Enter on the list, Cmd/Ctrl+Enter) and the stage
-  window's own next/prev move `a.stage`. `nextStage`/`prevStage` pull the
-  monitor along so the highlight follows the room. Do not wire a console
-  control straight to `a.stage`.
+  `takeSlide` (Go Live, Enter in the console, the tile's own **▶**,
+  Cmd/Ctrl+Enter) and the stage window's own next/prev move `a.stage`.
+  A tile's controls take their slide index (`takeSlideAt`, `moveSlideAt`,
+  `removeSlideAt`) and pull the monitor to it first, so the tile clicked is
+  the slide that acts. `nextStage`/`prevStage` pull the monitor along so the
+  highlight follows the room. A drag reorders the deck, it never takes a
+  slide. Do not wire a console control straight to `a.stage`.
 - **Keep the song and scripture text public domain.** `data.go` holds the
   5 traditional hymns and the 4 KJV verse packs; the KJV (1611) and those
   hymn texts are public domain. Do not paste in copyrighted lyrics or a
@@ -203,11 +206,11 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | --- | --- |
 | `main.go` | The app: `app` state and its `newWindow`/`mainScreen` seams, the demo account, sign-in/out, `changed`, `requestStage`/`settle`, `tickStats`, `setNDI`/`toggleNDI`/`ndiLabel`, `main()` startup order (app data dir, saved preferences, menu, display subscription, console window, first display refresh, stats timer), and the `stageSourceName` constant. |
 | `data.go` | The seed library: `builtinSongs` (5 public-domain hymns as `song{... Parts []songPart}`), 4 KJV verse packs (16 verses), `findSong`, `verseByRef`, the text-size limits and `clampTextSize`. |
-| `deck.go` | The run-of-show model: `slide` (including its snapshotted `TextSize`), `slideKind`, add/select/next/prev (monitor), `addSongParts`/`addPartSlides`/`addPart`, `takeSlide`, `nextStage`/`prevStage`, remove/move/blackout, `reorderSlides` (the drag and Move up/down path, `to` is a gap), `stageSlide`/`previewSlide`/`upcomingSlide`, `clampSlides`. |
+| `deck.go` | The run-of-show model: `slide` (including its snapshotted `TextSize`), `slideKind`, add/select/next/prev (monitor), `addSongParts`/`addPartSlides`/`addPart`, `takeSlide`/`takeSlideAt`, `nextStage`/`prevStage`, remove/move/blackout (`removeSlideAt`, `moveSlideAt`), `reorderSlides` (the move path, `to` is a gap), `stageSlide`/`previewSlide`/`upcomingSlide`, `clampSlides`. |
 | `library.go` | The song library: `library.json` read/write and versioning, `loadLibrary`/`saveLibrary`, first-launch seeding from `builtinSongs`, `normalizeLibrary`, `cloneSongs`, `newSongID`, and `(a *app) songByID`/`libraryPath`. |
 | `editor.go` | The Song editor window: `requestEditor`/`openEditorWindow`/`closeEditor`, the library list and search, the 16:9 preview, metadata/part/slide editing with immediate saves, text size, new/remove/restore songs, and adding a song or part to the run of show. |
-| `slideview.go` | The shared slide renderer: `stageDesignWidth`/`Height`, `stageScale`, `slideMetrics`/`metricsFor`, and `slideBody`, used by the stage window, the NDI feed and the editor preview. |
-| `console.go` | The console view: top bar (including **Song editor**), library (Songs/Bible tabs, search, pack picker), run of show list with the LIVE badge, the two-card stage/monitor panel with Go Live, and the login card. |
+| `slideview.go` | The shared slide renderer: `stageDesignWidth`/`Height`, `stageScale`, `slideMetrics`/`metricsFor`, and `slideBody`, used by the stage window, the NDI feed, the editor preview and the run of show's tiles. It draws the slide's text alone: the output carries no part label or song caption. |
+| `console.go` | The console view: top bar (including **Song editor** and the **Account** pane holding Settings, Check for Updates and Sign out), library (Songs/Bible tabs, search, pack picker), the run of show as a grid of whole-slide tiles grouped under each song (`deckGroups`, `deckGrid`, `deckTile`) with a go-live/move/remove toolbar per tile and drag-to-reorder on the picture (`deckDrag`, `dragLandsAfter`, `pendingDrop` applied by `settle`), the two-card stage/monitor panel with Go Live, and the login card. |
 | `output.go` | The stage window: `liveView`, stage shortcuts, `openOutput`/`closeOutput`/`togglePresent`, `placeStage`/`shutStage`. |
 | `theme.go` | The only file with literal colors: warm console theme (light/dark) and the forced-dark stage theme. |
 | `menu.go` | `buildMenu` (app, edit, Settings, Help menus; no Check for Updates, because the Help menu is macOS-only in MyGo) and `showAbout`. |

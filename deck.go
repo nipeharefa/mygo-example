@@ -25,7 +25,8 @@ type slide struct {
 	TextSize float64 // snapshot of the song's stage size when the slide was added
 }
 
-// caption names the slide under the stage preview.
+// caption names the slide in the console: a row's accessible name, and what
+// the run of show calls it. It is not drawn on the output.
 func (s slide) caption() string {
 	if s.Kind == slideVerse {
 		return s.Title
@@ -33,15 +34,7 @@ func (s slide) caption() string {
 	return s.Title + " · " + s.Section
 }
 
-// eyebrow is the small uppercase line above the slide text.
-func (s slide) eyebrow() string {
-	if s.Kind == slideVerse {
-		return "SCRIPTURE"
-	}
-	return strings.ToUpper(s.Section)
-}
-
-// firstLine is the slide's opening line, used to preview a deck row.
+// firstLine is the slide's opening line, used by the editor's slide list.
 func (s slide) firstLine() string {
 	if i := strings.IndexByte(s.Text, '\n'); i >= 0 {
 		return s.Text[:i]
@@ -172,6 +165,72 @@ func (a *app) takeSlide() {
 	a.changed()
 }
 
+// takeSlideAt sends one row to the stage and pulls the monitor to it: the
+// run of show's own Go Live, which acts on the row it sits in rather than on
+// whatever the monitor happens to be on.
+func (a *app) takeSlideAt(i int) {
+	if i < 0 || i >= len(a.deck) || i == a.stage {
+		return
+	}
+	a.preview = i
+	a.stage = i
+	a.changed()
+}
+
+// moveSlideAt moves one row by delta places, the row's own Up/Down. The
+// monitor follows the row; the slide on air stays on air wherever it lands.
+func (a *app) moveSlideAt(i, delta int) {
+	to := i + delta
+	if i < 0 || i >= len(a.deck) || to < 0 || to >= len(a.deck) {
+		return
+	}
+	a.reorderSlides([]int{i}, to)
+}
+
+// deckDrag is the value a tile's picture drags: the slide's row in the deck.
+type deckDrag struct{ from int }
+
+// deckDrop is a drag the console saw land: the row it came from, the tile it
+// landed on, and which side of that tile. The console applies it after the
+// frame, because ui.Drop delivers while the view builds.
+type deckDrop struct {
+	from  int
+	at    int
+	after bool
+}
+
+// dropSlide moves a dragged tile where it landed. Dropping on the gap it came
+// from, or on the far side of its own tile, changes nothing.
+func (a *app) dropSlide(d deckDrop) {
+	if d.from < 0 || d.from >= len(a.deck) || d.at < 0 || d.at >= len(a.deck) {
+		return
+	}
+	// The slot the slide goes in, in the deck as it is now, then as
+	// reorderSlides counts it: in the deck without the slide itself.
+	slot := d.at
+	if d.after {
+		slot++
+	}
+	to := slot
+	if d.from < slot {
+		to--
+	}
+	if to == d.from {
+		return
+	}
+	a.reorderSlides([]int{d.from}, to)
+}
+
+// removeSlideAt drops one row, the row's own Remove, and keeps the stage on
+// the slide it was showing.
+func (a *app) removeSlideAt(i int) {
+	if i < 0 || i >= len(a.deck) {
+		return
+	}
+	a.preview = i
+	a.removeSlide()
+}
+
 // nextStage advances the stage and pulls the monitor along, so the console
 // highlight keeps up with what the room sees.
 func (a *app) nextStage() {
@@ -219,11 +278,7 @@ func (a *app) removeSlide() {
 // moveSlide swaps the monitor row with its neighbour. The slide on air stays
 // on air: the reorder carries the stage along with the row it moves.
 func (a *app) moveSlide(delta int) {
-	p := a.preview + delta
-	if a.preview < 0 || a.preview >= len(a.deck) || p < 0 || p >= len(a.deck) {
-		return
-	}
-	a.reorderSlides([]int{a.preview}, p)
+	a.moveSlideAt(a.preview, delta)
 }
 
 // reorderSlides moves the rows chosen to before the row that is at to now,

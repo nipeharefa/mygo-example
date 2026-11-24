@@ -171,9 +171,6 @@ func TestAddVerseAppendsOneSlide(t *testing.T) {
 	if s.caption() != "Psalm 23:1" {
 		t.Errorf("caption = %q", s.caption())
 	}
-	if s.eyebrow() != "SCRIPTURE" {
-		t.Errorf("eyebrow = %q", s.eyebrow())
-	}
 	if a.preview != 0 {
 		t.Errorf("preview = %d, want the new slide", a.preview)
 	}
