@@ -74,8 +74,9 @@ func (a *app) editorView(c *ui.Context) {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "Song editor").FontSize(18).FontWeight(600).SingleLine()
 			ui.Spacer(c)
-			ui.Button(c, "Add song to run of show").OnClick(a.addEditorSongToDeck)
-			ui.Button(c, "Close").OnClick(a.closeEditor)
+			ui.Button(c, "Add song to run of show").OnClick(a.addEditorSongToDeck).
+				Disabled(len(a.songs) == 0)
+			ui.Button(c, "Close").Label("Close").OnClick(a.closeEditor)
 		})
 		ui.Row(c).Fill().Grow(1).Gap(editorGap).AlignItems(ui.Stretch).Children(func() {
 			a.editorSongs(c)
@@ -89,7 +90,7 @@ func (a *app) editorView(c *ui.Context) {
 // the song books the operator knows are laid out.
 func (a *app) editorSongs(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c).Width(editorSongsWidth).Gap(8).Children(func() {
+	ui.Column(c).Width(editorSongsWidth).FillHeight().Gap(8).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			editorSection(c, "Songs")
 			ui.Spacer(c)
@@ -114,11 +115,13 @@ func (a *app) editorSongs(c *ui.Context) {
 				for _, i := range shown {
 					i := i
 					s := a.songs[i]
-					bg := t.Background
+					bg := raisedRow(t)
+					border := hairlines(t)
 					if i == a.editSong {
-						bg = t.Selection
+						bg = rowSelected(t)
+						border = rowSelectedEdge(t)
 					}
-					ui.Column(c).Padding(8, 10).Gap(2).Radius(6).Background(bg).Label(s.Title).TabStop(true).OnClick(func() { a.selectSong(i) }).Children(func() {
+					ui.Column(c).Padding(9, 10).Gap(2).Radius(8).Border(1, border).Background(bg).Label(s.Title).TabStop(true).OnClick(func() { a.selectSong(i) }).Children(func() {
 						ui.Text(c, s.Title).FontSize(12).FontWeight(600).SingleLine()
 						ui.Text(c, songMeta(s)).FontSize(10).TextColor(t.TextMuted).SingleLine()
 					})
@@ -161,8 +164,12 @@ func songMeta(s song) string {
 // by its slides, so a verse split across slides reads as one block.
 func (a *app) editorSlides(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c).Width(editorSlidesWidth).Gap(8).Children(func() {
-		editorSection(c, "Slides")
+	ui.Column(c).Width(editorSlidesWidth).FillHeight().Gap(8).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			editorSection(c, "Slides")
+			ui.Spacer(c)
+			ui.Text(c, fmt.Sprint(a.slideCount())).FontSize(textLabel).TextColor(t.TextMuted).SingleLine()
+		})
 		if _, ok := a.selectedSong(); !ok {
 			ui.Text(c, "Select a song.").FontSize(11).TextColor(t.TextMuted)
 			return
@@ -174,9 +181,9 @@ func (a *app) editorSlides(c *ui.Context) {
 					j := j
 					part := a.songs[i].Parts[j]
 					ui.Column(c).Gap(3).Children(func() {
-						head := t.Background
+						head := sunken(t)
 						if j == a.editPart {
-							head = t.Surface
+							head = rowSelected(t)
 						}
 						ui.Row(c).Padding(6, 8).Radius(6).Background(head).Gap(6).AlignItems(ui.Center).Label(part.Label).TabStop(true).OnClick(func() { a.selectPart(j) }).Children(func() {
 							ui.Text(c, part.Label).FontSize(10).FontWeight(600).TextColor(t.TextMuted).Grow(1).SingleLine()
@@ -188,24 +195,43 @@ func (a *app) editorSlides(c *ui.Context) {
 							if strings.TrimSpace(line) == "" {
 								line = "Empty slide"
 							}
-							bg := t.Background
+							bg := raisedRow(t)
+							border := hairlines(t)
 							if j == a.editPart && k == a.editSlide {
-								bg = t.Selection
+								bg = rowSelected(t)
+								border = rowSelectedEdge(t)
 							}
-							ui.Row(c).Padding(7, 8).Radius(6).Gap(8).AlignItems(ui.Center).Background(bg).Label(fmt.Sprintf("%s slide %d", part.Label, k+1)).TabStop(true).OnClick(func() { a.selectEditorSlide(j, k) }).Children(func() {
+							ui.Row(c).Padding(7, 8).Radius(8).Border(1, border).Gap(8).AlignItems(ui.Center).Background(bg).Label(fmt.Sprintf("%s slide %d", part.Label, k+1)).TabStop(true).OnClick(func() { a.selectEditorSlide(j, k) }).Children(func() {
 								ui.Text(c, fmt.Sprint(k+1)).FontSize(10).TextColor(t.TextMuted).Width(14).SingleLine()
 								ui.Text(c, line).FontSize(11).Grow(1).SingleLine()
 							})
 						}
 					})
 				}
+				// The buttons follow the list they add to, inside the
+				// scroll, so they sit under the last slide rather than at
+				// the foot of the window.
+				ui.Row(c).Gap(6).PaddingY(6).Children(func() {
+					ui.Button(c, "Add slide").Label("Add slide").OnClick(a.addSlide).Grow(1)
+					ui.Button(c, "Add part").Label("Add part").OnClick(a.addEditorPart)
+				})
 			})
 		})
-		ui.Row(c).Gap(6).Children(func() {
-			ui.Button(c, "Add slide").OnClick(a.addSlide)
-			ui.Button(c, "Add part").OnClick(a.addEditorPart)
-		})
 	})
+}
+
+// slideCount is the selected song's slide total, the number beside the
+// Slides heading.
+func (a *app) slideCount() int {
+	s, ok := a.selectedSong()
+	if !ok {
+		return 0
+	}
+	n := 0
+	for _, p := range s.Parts {
+		n += len(p.Slides)
+	}
+	return n
 }
 
 // editorInspector edits what is selected: the song's details, the selected
@@ -219,9 +245,9 @@ func (a *app) editorInspector(c *ui.Context) {
 		return
 	}
 	width, _ := c.Size()
-	ui.Column(c).Grow(1).Children(func() {
-		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Column(c).Gap(12).Children(func() {
+	ui.Column(c).Grow(1).FillHeight().Children(func() {
+		ui.Scroll(c).Fill().Children(func() {
+			ui.Column(c).Gap(14).PaddingY(8).Children(func() {
 				ui.Column(c).Gap(6).Children(func() {
 					editorSection(c, "Preview")
 					a.editorPreview(c, previewWidth(width))
@@ -282,7 +308,11 @@ func (a *app) editorInspector(c *ui.Context) {
 							a.setTextSize(a.songs[i].TextSize)
 						})
 					})
-					ui.Button(c, "Remove song").OnClick(a.removeSong)
+					ui.Divider(c)
+					ui.Row(c).Children(func() {
+						ui.Button(c, "Remove song").OnClick(a.removeSong)
+						ui.Spacer(c)
+					})
 				})
 				if a.editorStatus != "" {
 					ui.Text(c, a.editorStatus).FontSize(11).TextColor(t.TextMuted)
@@ -292,9 +322,11 @@ func (a *app) editorInspector(c *ui.Context) {
 	})
 }
 
-// editorSection is a visible group heading inside a column.
+// editorSection is a visible group heading inside a column: the console's
+// tracked label, so the editor reads as the same app.
 func editorSection(c *ui.Context, label string) {
-	ui.Text(c, label).FontSize(12).FontWeight(600).SingleLine()
+	ui.Text(c, label).FontSize(textLabel).FontWeight(700).LetterSpacing(0.9).
+		TextColor(c.Theme().TextMuted).SingleLine()
 }
 
 // editorToggle folds a section's controls away, so the inspector can show

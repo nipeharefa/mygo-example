@@ -7,3 +7,5 @@ mygo_windows_*.syso
 *.dmg
 .DS_Store
 /mygo-demo.exe
+.npm-cache/
+.superdesign/

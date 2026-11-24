@@ -10,8 +10,23 @@ import (
 const (
 	// libraryWidth and stagePanelWidth are the console's fixed side columns;
 	// the run of show takes whatever the window width leaves.
-	libraryWidth    = 296
-	stagePanelWidth = 344
+	libraryWidth    = 300
+	stagePanelWidth = 352
+	// deckWidth is the run of show's reading column: rows wider than this
+	// leave the eye travelling across empty ground to reach the badge.
+	deckWidth = 560
+)
+
+// Text sizes, in the theme's points. They are named here because the console
+// repeats them: a row title, its second line, a zone heading and a tracked
+// label are each one size everywhere.
+const (
+	textLabel   = 10 // tracked uppercase labels and counters
+	textSmall   = 11 // second lines, hints, counters
+	textBody    = 12 // rows, buttons' labels
+	textTitle   = 13 // a zone heading
+	textSection = 15 // the run of show's heading
+	textDisplay = 20 // a page title
 )
 
 // view draws the login card or the console. It is a pure function of app:
@@ -50,52 +65,62 @@ func (a *app) view(c *ui.Context) {
 	a.settle()
 }
 
-// login is the demo gate: one card, two fields, one account.
+// login is the demo gate: one card, two fields, one account. The card sits on
+// a faint warm wash so it reads as the only lit thing in a dark room, the same
+// idea the stage uses.
 func (a *app) login(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Fill().Background(t.Background).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-		ui.Column(c).Width(380).Padding(30, 28).Gap(12).Radius(14).Background(t.Surface).Border(1, t.Border).Children(func() {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Box(c).Size(9, 9).Radius(999).Background(t.Accent)
-				ui.Text(c, appTitle).FontSize(12).FontWeight(600).TextColor(t.TextMuted).SingleLine()
+		ui.Column(c).Width(400).PaddingY(30).PaddingX(32).Gap(0).Radius(16).Background(t.Surface).
+			Border(1, t.Border).Shadow(0, 18, 48, 0, ui.Color{A: 36}).Children(func() {
+			a.brandMark(c, textBody)
+			ui.Column(c).Gap(5).PaddingY(18).Children(func() {
+				ui.Text(c, "Sign in to lead the service.").FontSize(24).FontWeight(700).SingleLine()
+				ui.Text(c, "Your set list and the live output stay on this machine.").
+					FontSize(textBody).TextColor(t.TextMuted)
 			})
-			ui.Text(c, "Sign in to lead the service.").FontSize(22).Bold()
-			ui.Text(c, "Your set list and the live output stay on this machine.").FontSize(11).TextColor(t.TextMuted)
-
-			ui.Column(c).Gap(4).Children(func() {
-				ui.Text(c, "Username").FontSize(11).TextColor(t.TextMuted).SingleLine()
+			ui.Column(c).Gap(6).PaddingY(8).Children(func() {
+				fieldLabel(c, "Username")
 				ui.TextInput(c, &a.username).Label("Username input").Placeholder(demoUsername).
 					OnChange(a.clearAuthError).OnSubmit(a.signIn)
 			})
-			ui.Column(c).Gap(4).Children(func() {
-				ui.Text(c, "Password").FontSize(11).TextColor(t.TextMuted).SingleLine()
+			ui.Column(c).Gap(6).PaddingY(8).Children(func() {
+				fieldLabel(c, "Password")
 				ui.TextInput(c, &a.password).Label("Password input").Password().Placeholder("Password").
 					OnChange(a.clearAuthError).OnSubmit(a.signIn)
 			})
-
 			if a.authErr != "" {
-				ui.Text(c, a.authErr).FontSize(11).TextColor(t.Danger).SingleLine()
+				ui.Row(c).PaddingY(6).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Box(c).Size(6, 6).Radius(999).Background(t.Danger)
+					ui.Text(c, a.authErr).FontSize(textSmall).TextColor(t.Danger).SingleLine()
+				})
 			}
-			ui.PrimaryButton(c, "Sign in").OnClick(a.signIn)
-			ui.Text(c, "Demo account: "+demoUsername+" / "+demoPassword).FontSize(10).TextColor(t.TextMuted).SingleLine()
+			ui.Column(c).PaddingY(10).Children(func() {
+				ui.PrimaryButton(c, "Sign in").OnClick(a.signIn)
+			})
+			ui.Row(c).PaddingY(4).Gap(6).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "Demo account").FontSize(textLabel).FontWeight(600).TextColor(t.TextMuted).SingleLine()
+				ui.Text(c, demoUsername+" / "+demoPassword).FontSize(textLabel).TextColor(t.TextMuted).SingleLine()
+			})
 		})
 	})
 }
 
-// shell is the console frame: a top bar and three columns, fixeds on the
-// sides and the run of show between them. Every mutating control is wired
-// to an app method that changes state and invalidates both windows.
+// shell is the console frame: a brand bar, a transport bar, and three zones
+// under them. Every mutating control is wired to an app method that changes
+// state and invalidates both windows.
 func (a *app) shell(c *ui.Context) {
 	t := c.Theme()
 	a.statsWanted = false
+	// The bar is drawn on the console's own background, not on a raised
+	// surface: the three columns below are the raised parts, so the frame
+	// reads as one desk with a well and two lit side panels.
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
 		a.topBar(c)
+		hrule(c)
 		if a.ndiErr != "" {
-			ui.Row(c).Padding(16, 10).Children(func() {
-				ui.Text(c, "NDI: "+a.ndiErr).FontSize(11).TextColor(t.Danger).SingleLine()
-			})
+			a.errorStrip(c, "NDI: "+a.ndiErr)
 		}
-		ui.Divider(c)
 		if a.page == pageSettings {
 			a.settingsBody(c)
 		} else {
@@ -103,64 +128,111 @@ func (a *app) shell(c *ui.Context) {
 			// default: the panels are content-height otherwise.
 			ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
 				a.library(c)
-				ui.Divider(c)
+				vrule(c)
 				a.service(c)
-				ui.Divider(c)
+				vrule(c)
 				a.stagePanel(c)
 			})
 		}
 	})
 }
 
+// topBar is the brand row and the transport row. The brand row holds what
+// says where the operator is (the app, the page, what the room sees); the
+// transport row holds what does something, in the order an operator reaches
+// for it.
 func (a *app) topBar(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c).Padding(16, 12).Gap(10).AlignItems(ui.Center).Background(t.Surface).Children(func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Size(9, 9).Radius(999).Background(t.Accent)
-			ui.Text(c, appTitle).FontSize(15).Bold().SingleLine()
-		})
-		ui.Text(c, appSubtitle).FontSize(11).TextColor(t.TextMuted).SingleLine()
-		ui.Spacer(c)
-		a.statusPill(c)
-		if a.live == nil {
-			ui.Button(c, "Open output").OnClick(a.requestStage)
-		} else {
-			if a.live.IsFullScreen() {
-				ui.Button(c, "Exit full screen").OnClick(a.togglePresent)
+	ui.Column(c).Children(func() {
+		ui.Row(c).Padding(18, 12).Gap(10).AlignItems(ui.Center).Children(func() {
+			a.brandMark(c, textSection)
+			if a.page == pageSettings {
+				ui.Text(c, "Settings").FontSize(textBody).TextColor(t.TextMuted).SingleLine()
 			} else {
-				ui.Button(c, "Present").OnClick(a.togglePresent)
+				a.statusPill(c)
 			}
-			ui.Button(c, "Close output").OnClick(a.closeOutput)
+			ui.Spacer(c)
+			a.transport(c)
+		})
+	})
+}
+
+// brandMark is the beacon dot and the app's name, the one element every
+// window carries.
+func (a *app) brandMark(c *ui.Context, size float32) {
+	t := c.Theme()
+	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Box(c).Size(9, 9).Radius(999).Background(t.Accent)
+		ui.Text(c, appTitle).FontSize(size).FontWeight(700).SingleLine()
+		if size <= textBody {
+			return
+		}
+		ui.Text(c, appSubtitle).FontSize(textSmall).TextColor(t.TextMuted).SingleLine()
+	})
+}
+
+// transport is the run of buttons that act on the output. Grouped, because
+// the stage controls and the moving parts of the app are different jobs: the
+// stage group changes the room, the rest changes the console.
+func (a *app) transport(c *ui.Context) {
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		if a.live == nil {
+			ui.PrimaryButton(c, "Open output").OnClick(a.requestStage)
+		} else {
+			label := "Present"
+			if a.live.IsFullScreen() {
+				label = "Exit full screen"
+			}
+			ui.PrimaryButton(c, label).OnClick(a.togglePresent)
 			if ndiSupported() {
 				ui.Button(c, a.ndiLabel()).OnClick(a.toggleNDI)
 			}
+			ui.Button(c, "Close output").OnClick(a.closeOutput)
 		}
-		ui.Button(c, "Check for Updates").OnClick(a.checkForUpdates)
+		vruler(c)
 		ui.Button(c, "Song editor").OnClick(a.requestEditor)
 		ui.Button(c, "Settings").Label("Settings").OnClick(a.showSettings)
+		ui.Button(c, "Check for Updates").OnClick(a.checkForUpdates)
+		vruler(c)
 		ui.Button(c, "Sign out").OnClick(a.signOut)
 	})
 }
 
-// statusPill tells the operator what the output is showing right now.
+// statusPill tells the operator what the output is showing right now. With
+// no output open it says STANDBY rather than PREVIEW: the monitor row is
+// always a preview, so the pill only claims a state when the room has one.
 func (a *app) statusPill(c *ui.Context) {
 	t := c.Theme()
-	label, color := "PREVIEW", t.TextMuted
+	label, color := "STANDBY", t.TextMuted
 	if a.blackout {
 		label, color = "BLACK", t.Warning
 	} else if a.live != nil {
-		label, color = "LIVE", t.Success
+		label, color = "LIVE", onAirColor(t)
 	}
-	ui.Row(c).Padding(9, 5).Gap(6).Radius(999).Background(t.SurfaceHover).AlignItems(ui.Center).Children(func() {
-		ui.Box(c).Size(7, 7).Radius(999).Background(color)
-		ui.Text(c, label).FontSize(10).FontWeight(600).TextColor(color).SingleLine()
+	ui.Row(c).PaddingY(5).PaddingX(10).Gap(6).Radius(999).AlignItems(ui.Center).
+		Border(1, color.Alpha(0.35)).Background(color.Alpha(0.10)).Children(func() {
+		ui.Box(c).Size(6, 6).Radius(999).Background(color)
+		ui.Text(c, label).FontSize(textLabel).FontWeight(700).LetterSpacing(0.8).TextColor(color).SingleLine()
 	})
 }
 
+// errorStrip is a full-width note under the bar, for a failure the operator
+// has to know about while the service runs.
+func (a *app) errorStrip(c *ui.Context, message string) {
+	t := c.Theme()
+	ui.Row(c).Padding(18, 8).Gap(8).AlignItems(ui.Center).Background(t.Danger.Alpha(0.10)).Children(func() {
+		ui.Box(c).Size(6, 6).Radius(999).Background(t.Danger)
+		ui.Text(c, message).FontSize(textSmall).TextColor(t.Danger).SingleLine()
+	})
+}
+
+// library is the source column: Songs or Bible, searched and added from.
 func (a *app) library(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Width(libraryWidth).FillHeight().Background(t.Surface).Children(func() {
-		ui.Tabs(c, &a.tab, "Songs", "Bible").Padding(14, 10)
+		ui.Row(c).Padding(16, 12, 0).Children(func() {
+			ui.Tabs(c, &a.tab, "Songs", "Bible").PaddingY(2)
+		})
 		if a.tab == 0 {
 			a.songLibrary(c)
 		} else {
@@ -170,13 +242,19 @@ func (a *app) library(c *ui.Context) {
 }
 
 func (a *app) songLibrary(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Grow(1).Gap(8).Children(func() {
-		ui.Row(c).Padding(0, 12).Children(func() {
+	ui.Column(c).Grow(1).Gap(8).Padding(0, 10).Children(func() {
+		ui.Row(c).Padding(16, 0, 0).Children(func() {
 			ui.SearchField(c, &a.songQuery).Label("Search songs").Placeholder("Search songs").Grow(1)
 		})
+		count := 0
+		for _, s := range a.songs {
+			if songMatches(s, a.songQuery) {
+				count++
+			}
+		}
+		a.zoneLabel(c, fmt.Sprintf("%d songs", count))
 		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Column(c).Gap(6).Padding(0, 12, 12).Children(func() {
+			ui.Column(c).Gap(4).Padding(12, 0, 16).Children(func() {
 				found := false
 				for _, s := range a.songs {
 					if !songMatches(s, a.songQuery) {
@@ -186,7 +264,7 @@ func (a *app) songLibrary(c *ui.Context) {
 					a.songRow(c, s)
 				}
 				if !found {
-					ui.Text(c, "No songs match.").FontSize(11).TextColor(t.TextMuted).Padding(6)
+					a.emptyNote(c, "No songs match.", "Try a title or an author.")
 				}
 			})
 		})
@@ -202,28 +280,32 @@ func songMatches(s song, query string) bool {
 		strings.Contains(strings.ToLower(s.Author), q)
 }
 
+// songRow is a library row: the song on the left, the one action it has on
+// the right. It is a raised card inside the column so the Add button reads as
+// a control, not as part of the row.
 func (a *app) songRow(c *ui.Context, s song) {
 	t := c.Theme()
-	ui.Row(c).Padding(9, 10).Gap(8).AlignItems(ui.Center).Radius(8).Background(t.Background).Children(func() {
-		ui.Column(c).Gap(2).Grow(1).Children(func() {
-			ui.Text(c, s.Title).FontSize(12).FontWeight(600).SingleLine()
-			ui.Text(c, s.Author+" · "+s.Key).FontSize(10).TextColor(t.TextMuted).SingleLine()
+	ui.Row(c).Padding(10, 9).Gap(8).AlignItems(ui.Center).Radius(8).
+		Background(raisedRow(t)).Border(1, hairlines(t)).Children(func() {
+		ui.Column(c).Gap(1).Grow(1).Children(func() {
+			ui.Text(c, s.Title).FontSize(textBody).FontWeight(600).SingleLine()
+			ui.Text(c, s.Author+" · "+s.Key).FontSize(textSmall).TextColor(t.TextMuted).SingleLine()
 		})
 		ui.Button(c, "Add").Label("Add " + s.Title).OnClick(func() { a.addSong(s.ID) })
 	})
 }
 
 func (a *app) verseLibrary(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Grow(1).Gap(8).Children(func() {
-		ui.Row(c).Padding(0, 12).Children(func() {
+	ui.Column(c).Grow(1).Gap(8).Padding(0, 10).Children(func() {
+		ui.Row(c).Padding(16, 0, 0).Children(func() {
 			ui.SearchField(c, &a.verseQuery).Label("Search verses").Placeholder("Search verses").Grow(1)
 		})
-		ui.Row(c).Padding(0, 12).Children(func() {
+		ui.Row(c).Padding(16, 0, 0).Children(func() {
 			ui.Select(c, &a.pack, packNames()).Grow(1)
 		})
+		a.zoneLabel(c, fmt.Sprintf("%d verses", len(packVerses(a.pack))))
 		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Column(c).Gap(6).Padding(0, 12, 12).Children(func() {
+			ui.Column(c).Gap(4).Padding(12, 0, 16).Children(func() {
 				found := false
 				for _, v := range packVerses(a.pack) {
 					if !verseMatches(v, a.verseQuery) {
@@ -233,7 +315,7 @@ func (a *app) verseLibrary(c *ui.Context) {
 					a.verseRow(c, v)
 				}
 				if !found {
-					ui.Text(c, "No verses match.").FontSize(11).TextColor(t.TextMuted).Padding(6)
+					a.emptyNote(c, "No verses match.", "Try a reference or a few words.")
 				}
 			})
 		})
@@ -268,37 +350,39 @@ func verseMatches(v verse, query string) bool {
 
 func (a *app) verseRow(c *ui.Context, v verse) {
 	t := c.Theme()
-	ui.Row(c).Padding(9, 10).Gap(8).AlignItems(ui.Center).Radius(8).Background(t.Background).Children(func() {
-		ui.Column(c).Gap(2).Grow(1).Children(func() {
-			ui.Text(c, v.Ref).FontSize(12).FontWeight(600).SingleLine()
-			ui.Text(c, v.Text).FontSize(10).TextColor(t.TextMuted).SingleLine()
+	ui.Row(c).Padding(10, 9).Gap(8).AlignItems(ui.Center).Radius(8).
+		Background(raisedRow(t)).Border(1, hairlines(t)).Children(func() {
+		ui.Column(c).Gap(1).Grow(1).Children(func() {
+			ui.Text(c, v.Ref).FontSize(textBody).FontWeight(600).SingleLine()
+			ui.Text(c, v.Text).FontSize(textSmall).TextColor(t.TextMuted).SingleLine()
 		})
 		ui.Button(c, "Add").Label("Add " + v.Ref).OnClick(func() { a.addVerse(v.Ref) })
 	})
 }
 
-// service is the run of show: the deck, with the controls that shape it.
+// service is the run of show: the deck, with the controls that shape it. It
+// sits in a well, so the rows that will go on air are the only raised things
+// in the middle of the console.
 func (a *app) service(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c).Grow(1).FillHeight().Children(func() {
-		ui.Row(c).Padding(18, 14).Gap(8).AlignItems(ui.Center).Children(func() {
+	ui.Column(c).Grow(1).FillHeight().Background(sunken(t)).Children(func() {
+		ui.Row(c).PaddingY(16).PaddingX(24).Gap(8).AlignItems(ui.Center).Children(func() {
+			// The title is the column's name; it never truncates. When the
+			// window is at its minimum the buttons take what is left instead,
+			// so the heading folds to its first word.
 			ui.Column(c).Gap(2).Grow(1).Children(func() {
-				ui.Text(c, "Run of show").FontSize(16).Bold().SingleLine()
-				ui.Text(c, fmt.Sprintf("%d slides", len(a.deck))).FontSize(11).TextColor(t.TextMuted).SingleLine()
+				ui.Text(c, "Run of show").FontSize(textSection).FontWeight(700).SingleLine()
+				ui.Text(c, a.deckSummary()).FontSize(textSmall).TextColor(t.TextMuted).SingleLine()
 			})
-			ui.Button(c, "Move up").Label("Move slide up").OnClick(func() { a.moveSlide(-1) }).
+			ui.Button(c, "Up").Label("Move slide up").OnClick(func() { a.moveSlide(-1) }).
 				Disabled(len(a.deck) == 0 || a.preview == 0)
-			ui.Button(c, "Move down").Label("Move slide down").OnClick(func() { a.moveSlide(1) }).
+			ui.Button(c, "Down").Label("Move slide down").OnClick(func() { a.moveSlide(1) }).
 				Disabled(len(a.deck) == 0 || a.preview >= len(a.deck)-1)
 			ui.Button(c, "Remove").Label("Remove slide").OnClick(a.removeSlide).
 				Disabled(len(a.deck) == 0)
 		})
-		ui.Divider(c)
 		if len(a.deck) == 0 {
-			ui.Column(c).Grow(1).AlignItems(ui.Center).Justify(ui.Center).Gap(6).Children(func() {
-				ui.Text(c, "Nothing on stage yet.").FontSize(13).TextColor(t.TextMuted)
-				ui.Text(c, "Add a song or verse from the library.").FontSize(11).TextColor(t.TextMuted)
-			})
+			a.deckEmpty(c)
 			return
 		}
 		// The list keeps its own selection state; point it at the app's index
@@ -310,29 +394,73 @@ func (a *app) service(c *ui.Context) {
 		}
 		// Dragging a row reorders the deck; the stage stays on whatever it is
 		// airing. Move up/down is the same rule from the keyboard.
-		ui.List(c, &a.deckList, len(a.deck), func(i int) {
-			a.deckRow(c, i)
-		}).Grow(1).OnSubmit(a.takeSlide)
+		ui.Column(c).Grow(1).Padding(8, 0, 16).AlignItems(ui.Center).Children(func() {
+			ui.List(c, &a.deckList, len(a.deck), func(i int) {
+				a.deckRow(c, i)
+			}).Grow(1).MaxWidth(deckWidth).FillWidth().OnSubmit(a.takeSlide)
+		})
+	})
+}
+
+// deckSummary is the line under the run of show's heading: how many slides,
+// and which one the monitor is on.
+func (a *app) deckSummary() string {
+	if len(a.deck) == 0 {
+		return "No slides yet"
+	}
+	// Short by design: the line has to fit the column at the window's
+	// minimum width, beside three buttons.
+	return fmt.Sprintf("%d slides · %d of %d", len(a.deck), a.preview+1, len(a.deck))
+}
+
+// deckEmpty is what the run of show says before the first song is added: it
+// names the next step instead of only reporting the absence.
+func (a *app) deckEmpty(c *ui.Context) {
+	t := c.Theme()
+	ui.Column(c).Grow(1).AlignItems(ui.Center).Justify(ui.Center).Gap(8).Padding(0, 0, 40).Children(func() {
+		ui.Box(c).Size(34, 3).Radius(999).Background(t.Accent.Alpha(0.35))
+		ui.Text(c, "Nothing on stage yet.").FontSize(textTitle).FontWeight(600)
+		ui.Text(c, "Add a song or verse from the library.").FontSize(textBody).TextColor(t.TextMuted)
+		ui.Row(c).Gap(14).Padding(6, 0, 0).Children(func() {
+			a.keyHint(c, "← →", "monitor")
+			a.keyHint(c, "↵", "go live")
+			a.keyHint(c, "B", "black out")
+		})
 	})
 }
 
 func (a *app) deckRow(c *ui.Context, i int) {
 	t := c.Theme()
 	s := a.deck[i]
-	bg := t.Background
-	if i == a.preview {
-		bg = t.SurfaceHover
+	bg := raisedRow(t)
+	border := hairlines(t)
+	onAir := i == a.stage
+	selected := i == a.preview
+	if selected {
+		bg = rowSelected(t)
+		border = rowSelectedEdge(t)
 	}
-	ui.Row(c).Padding(9, 11).Gap(10).AlignItems(ui.Center).Radius(8).Background(bg).
+	ui.Row(c).Padding(10, 10).Gap(12).AlignItems(ui.Center).Radius(8).Background(bg).
+		Border(1, border).
 		Label(fmt.Sprintf("Slide %d: %s", i+1, s.caption())).
 		OnClick(func() { a.selectSlide(i) }).Children(func() {
-		ui.Text(c, fmt.Sprint(i+1)).FontSize(10).TextColor(t.TextMuted).Width(18).SingleLine()
-		ui.Column(c).Gap(2).Grow(1).Children(func() {
-			ui.Text(c, s.Title).FontSize(12).FontWeight(600).SingleLine()
-			ui.Text(c, deckSubline(s)).FontSize(10).TextColor(t.TextMuted).SingleLine()
+		// The position is a monospaced-ish stamp: a fixed width keeps every
+		// title in the list starting on the same line.
+		ui.Text(c, fmt.Sprintf("%02d", i+1)).FontSize(textSmall).FontWeight(600).
+			TextColor(t.TextMuted).Width(20).SingleLine()
+		ui.Column(c).Gap(1).Grow(1).Children(func() {
+			title := ui.Text(c, s.Title).FontSize(textBody).FontWeight(600).SingleLine()
+			if selected {
+				title.TextColor(t.Text)
+			}
+			ui.Text(c, deckSubline(s)).FontSize(textSmall).TextColor(t.TextMuted).SingleLine()
 		})
-		if i == a.stage {
-			ui.Badge(c, "LIVE")
+		if onAir && a.blackout {
+			blackBadge(c)
+		} else if onAir {
+			onAirBadge(c, "LIVE")
+		} else if selected {
+			monitorBadge(c)
 		}
 	})
 }
@@ -353,56 +481,92 @@ func deckSubline(s slide) string {
 func (a *app) stagePanel(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Width(stagePanelWidth).FillHeight().Background(t.Surface).Children(func() {
-		ui.Scroll(c).Fill().Padding(14).Children(func() {
-			ui.Column(c).Gap(10).Children(func() {
-				a.panelHeader(c, "STAGE · LIVE", t.Success, a.stage)
-				a.slideCard(c, a.stageSlide, "Nothing on stage")
-				a.panelHeader(c, "MONITOR · PREVIEW", t.TextMuted, a.preview)
-				a.slideCard(c, a.previewSlide, "Nothing selected")
-
-				ui.PrimaryButton(c, "Go Live").OnClick(a.takeSlide).Disabled(len(a.deck) == 0)
-
-				ui.Row(c).Gap(8).Children(func() {
-					ui.Button(c, "Prev").Label("Previous slide").OnClick(a.prevSlide).Grow(1)
-					ui.Button(c, "Next").Label("Next slide").OnClick(a.nextSlide).Grow(1)
-				})
+		ui.Scroll(c).Fill().Padding(16).Children(func() {
+			ui.Column(c).Gap(12).Children(func() {
+				a.panelHeader(c, "STAGE · LIVE", a.stage, true)
 				if a.blackout {
-					ui.Button(c, "Clear black out").OnClick(a.toggleBlackout)
+					a.blackCard(c)
 				} else {
-					ui.Button(c, "Black out").OnClick(a.toggleBlackout)
+					a.slideCard(c, a.stageSlide, "Nothing on stage", true)
 				}
-				ui.Text(c, "← → monitor · Enter go live · B black out").
-					FontSize(10).TextColor(t.TextMuted)
+				a.panelHeader(c, "MONITOR · PREVIEW", a.preview, false)
+				a.slideCard(c, a.previewSlide, "Nothing selected", false)
+
+				ui.Column(c).Gap(8).PaddingY(4).Children(func() {
+					if a.blackout {
+						ui.PrimaryButton(c, "Clear black out").OnClick(a.toggleBlackout)
+					} else {
+						ui.PrimaryButton(c, "Go Live").OnClick(a.takeSlide).Disabled(len(a.deck) == 0)
+					}
+					ui.Row(c).Gap(8).Children(func() {
+						ui.Button(c, "Prev").Label("Previous slide").OnClick(a.prevSlide).Grow(1)
+						ui.Button(c, "Next").Label("Next slide").OnClick(a.nextSlide).Grow(1)
+						if !a.blackout {
+							ui.Button(c, "Black out").OnClick(a.toggleBlackout)
+						}
+					})
+				})
+				ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+					a.keyHint(c, "← →", "monitor")
+					a.keyHint(c, "↵", "go live")
+					a.keyHint(c, "B", "black out")
+				})
 			})
 		})
 	})
 }
 
-// panelHeader labels a card with a live dot and its position in the deck.
-func (a *app) panelHeader(c *ui.Context, label string, dot ui.Color, i int) {
+// panelHeader labels a card with its state and its position in the deck.
+func (a *app) panelHeader(c *ui.Context, label string, i int, live bool) {
 	t := c.Theme()
-	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+	dot := t.TextMuted
+	if live {
+		dot = onAirColor(t)
+	}
+	ui.Row(c).Gap(7).AlignItems(ui.Center).Children(func() {
 		ui.Box(c).Size(6, 6).Radius(999).Background(dot)
-		ui.Text(c, label).FontSize(10).FontWeight(600).LetterSpacing(0.8).TextColor(t.TextMuted).SingleLine()
+		ui.Text(c, label).FontSize(textLabel).FontWeight(700).LetterSpacing(0.9).
+			TextColor(t.TextMuted).SingleLine()
 		ui.Spacer(c)
-		ui.Text(c, a.deckCounter(i)).FontSize(10).TextColor(t.TextMuted).SingleLine()
+		ui.Text(c, a.deckCounter(i)).FontSize(textLabel).TextColor(t.TextMuted).SingleLine()
 	})
 }
 
-// slideCard renders one slide in the output's own colors, so both cards
-// look like the room does.
-func (a *app) slideCard(c *ui.Context, get func() (slide, bool), empty string) {
-	st := stageTheme()
+// slideCard renders one slide in the output's own colors, so both cards look
+// like the room does. The stage card keeps its aura while the monitor card
+// stays quiet: only one of them can be on air, so only one may glow.
+func (a *app) slideCard(c *ui.Context, get func() (slide, bool), empty string, live bool) {
 	ui.Column(c).WidthPercent(100).AspectRatio(16.0/9.0).Radius(10).
-		Background(st.Background).Border(1, st.Border).Padding(16).Justify(ui.Center).Children(func() {
+		Background(stageSurface()).Border(1, stageCardBorder()).
+		Shadow(0, 0, 22, 0, glow(c.Theme())).
+		Padding(16).Justify(ui.Center).Gap(5).Children(func() {
 		s, ok := get()
 		if !ok {
-			ui.Text(c, empty).FontSize(12).TextColor(st.TextMuted).SingleLine()
+			ui.Text(c, empty).FontSize(textBody).TextColor(mutedOnStage()).SingleLine()
 			return
 		}
-		ui.Text(c, s.eyebrow()).FontSize(8).FontWeight(600).LetterSpacing(1.2).TextColor(st.Accent).SingleLine()
-		ui.Text(c, s.Text).FontSize(13).LineHeight(1.35).TextColor(st.Text)
-		ui.Text(c, s.caption()).FontSize(8).TextColor(st.TextMuted).SingleLine()
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Box(c).Size(5, 5).Radius(999).Background(beaconOnStage())
+			ui.Text(c, s.eyebrow()).FontSize(8).FontWeight(700).LetterSpacing(1.2).
+				TextColor(beaconOnStage()).SingleLine()
+		})
+		// Two lines, because a thumbnail that drops the rest of the verse
+		// makes the operator check the stage window instead of the console.
+		ui.Text(c, s.Text).FontSize(11).LineHeight(1.35).TextColor(inkOnStage()).
+			MaxWidthPercent(100)
+	})
+}
+
+// blackCard is the stage card while the room is dark. It keeps the card's
+// shape, so the panel does not jump, and says why it is empty.
+func (a *app) blackCard(c *ui.Context) {
+	ui.Column(c).WidthPercent(100).AspectRatio(16.0/9.0).Radius(10).
+		Background(dimOnStage()).Border(1, stageCardBorder()).
+		Padding(14).Justify(ui.Center).Children(func() {
+		ui.Text(c, "BLACKED OUT").FontSize(8).FontWeight(700).LetterSpacing(1.2).
+			TextColor(beaconOnStage()).SingleLine()
+		ui.Text(c, "The room is dark; the deck is held.").FontSize(textBody).
+			TextColor(mutedOnStage()).SingleLine()
 	})
 }
 
@@ -412,4 +576,82 @@ func (a *app) deckCounter(i int) string {
 		return "0 / 0"
 	}
 	return fmt.Sprintf("%d / %d", i+1, len(a.deck))
+}
+
+// zoneLabel is the small tracked line that names what a list holds.
+func (a *app) zoneLabel(c *ui.Context, label string) {
+	t := c.Theme()
+	ui.Text(c, label).FontSize(textLabel).FontWeight(600).LetterSpacing(0.8).
+		TextColor(t.TextMuted).Padding(16, 2, 0, 4).SingleLine()
+}
+
+// emptyNote is a list's empty state: what happened, then the way out.
+func (a *app) emptyNote(c *ui.Context, title, hint string) {
+	t := c.Theme()
+	ui.Column(c).Gap(2).Padding(8, 12).Children(func() {
+		ui.Text(c, title).FontSize(textBody).FontWeight(600).TextColor(t.TextMuted).SingleLine()
+		ui.Text(c, hint).FontSize(textSmall).TextColor(t.TextMuted).SingleLine()
+	})
+}
+
+// fieldLabel names an input above it, so the placeholder can disappear
+// without taking the label with it.
+func fieldLabel(c *ui.Context, label string) {
+	ui.Text(c, label).FontSize(textSmall).TextColor(c.Theme().TextMuted).SingleLine()
+}
+
+// keyHint is one keyboard shortcut and what it does, the form the console
+// uses wherever it teaches a key.
+func (a *app) keyHint(c *ui.Context, keys, what string) {
+	t := c.Theme()
+	ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, keys).FontSize(textLabel).FontWeight(600).TextColor(t.Text).
+			Padding(4, 2).Radius(4).Background(innerWell(t)).SingleLine()
+		ui.Text(c, what).FontSize(textLabel).TextColor(t.TextMuted).SingleLine()
+	})
+}
+
+// onAirBadge marks the one row the room is showing. It is filled, unlike
+// every other label on the row, so it cannot be read as a status light.
+func onAirBadge(c *ui.Context, label string) {
+	t := c.Theme()
+	ui.Row(c).PaddingY(3).PaddingX(9).Radius(999).Background(onAirColor(t)).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, label).FontSize(textLabel).FontWeight(700).LetterSpacing(0.7).
+			TextColor(t.Background).SingleLine()
+	})
+}
+
+// blackBadge takes the place of the LIVE badge while the room is dark: the
+// row is still the one on stage, but nothing is on screen.
+func blackBadge(c *ui.Context) {
+	t := c.Theme()
+	ui.Row(c).PaddingY(2).PaddingX(8).Radius(999).Background(t.Warning.Alpha(0.18)).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "BLACK").FontSize(9).FontWeight(700).LetterSpacing(0.7).
+			TextColor(t.Warning).SingleLine()
+	})
+}
+
+// monitorBadge marks the row the operator is on when it is not the one on
+// air: a hairline outline and no fill.
+func monitorBadge(c *ui.Context) {
+	t := c.Theme()
+	ui.Row(c).PaddingY(2).PaddingX(8).Radius(999).Border(1, t.Accent.Alpha(0.5)).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "MONITOR").FontSize(9).FontWeight(700).LetterSpacing(0.7).
+			TextColor(t.Accent).SingleLine()
+	})
+}
+
+// hrule is the hairline between the console's rows, and vrule the one
+// between its columns. They are lighter than a control's border on purpose.
+func hrule(c *ui.Context) {
+	ui.Row(c).Height(1).FillWidth().Background(hairlines(c.Theme()))
+}
+
+func vrule(c *ui.Context) {
+	ui.Column(c).Width(1).FillHeight().Background(hairlines(c.Theme()))
+}
+
+// vruler is the short vertical rule that groups the top bar's buttons.
+func vruler(c *ui.Context) {
+	ui.Column(c).Width(1).Height(18).Background(hairlines(c.Theme()))
 }

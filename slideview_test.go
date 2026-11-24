@@ -18,13 +18,13 @@ func TestStageScale(t *testing.T) {
 
 func TestMetricsFor(t *testing.T) {
 	m := metricsFor(1280, 40)
-	want := slideMetrics{Eyebrow: 14, Letter: 2, Text: 40, Caption: 16, PadX: 56, PadY: 72}
+	want := slideMetrics{Eyebrow: 15, Letter: 2.6, Text: 40, Caption: 17, PadX: 72, PadY: 84}
 	if m != want {
 		t.Errorf("metricsFor(1280, 40) = %+v, want %+v", m, want)
 	}
 
 	half := metricsFor(640, 40)
-	if half != (slideMetrics{Eyebrow: 7, Letter: 1, Text: 20, Caption: 8, PadX: 28, PadY: 36}) {
+	if half != (slideMetrics{Eyebrow: 7.5, Letter: 1.3, Text: 20, Caption: 8.5, PadX: 36, PadY: 42}) {
 		t.Errorf("metricsFor(640, 40) = %+v", half)
 	}
 

@@ -30,12 +30,12 @@ func metricsFor(width float32, textSize float64) slideMetrics {
 	s := stageScale(width)
 	size := float32(clampTextSize(textSize))
 	return slideMetrics{
-		Eyebrow: 14 * s,
-		Letter:  2 * s,
+		Eyebrow: 15 * s,
+		Letter:  2.6 * s,
 		Text:    size * s,
-		Caption: 16 * s,
-		PadX:    56 * s,
-		PadY:    72 * s,
+		Caption: 17 * s,
+		PadX:    72 * s,
+		PadY:    84 * s,
 	}
 }
 
@@ -45,7 +45,15 @@ func metricsFor(width float32, textSize float64) slideMetrics {
 // the editor preview sits in a console window: it must look like the stage
 // without changing the window's theme.
 func slideBody(c *ui.Context, s slide, m slideMetrics, t *ui.Theme) {
-	ui.Text(c, s.eyebrow()).FontSize(m.Eyebrow).FontWeight(600).LetterSpacing(m.Letter).TextColor(t.Accent).SingleLine()
-	ui.Text(c, s.Text).FontSize(m.Text).LineHeight(1.3).TextAlign(ui.Center).TextColor(t.Text)
-	ui.Text(c, s.caption()).FontSize(m.Caption).TextColor(t.TextMuted).TextAlign(ui.Center)
+	// The eyebrow is a label the room reads once, so it is set small and
+	// spaced: it names the verse without competing with it.
+	ui.Text(c, s.eyebrow()).FontSize(m.Eyebrow).FontWeight(700).LetterSpacing(m.Letter).
+		TextColor(t.Accent).TextAlign(ui.Center).SingleLine()
+	// The block hangs a little above center so the caption has air under the
+	// last line instead of touching it.
+	ui.Column(c).Padding(0, m.PadY*0.22).Children(func() {
+		ui.Text(c, s.Text).FontSize(m.Text).LineHeight(1.32).TextAlign(ui.Center).TextColor(t.Text)
+	})
+	ui.Text(c, s.caption()).FontSize(m.Caption).TextColor(t.TextMuted).TextAlign(ui.Center).
+		Padding(0, m.PadY*0.34, 0, 0)
 }
