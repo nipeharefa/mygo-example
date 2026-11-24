@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/egoist/mygo"
 )
 
 // libraryVersion is the shape of library.json. A file from a newer version is
@@ -68,18 +70,43 @@ func writeLibrary(path string, f libraryFile) error {
 	return writeFileAtomic(path, append(data, '\n'))
 }
 
+// marshalLibrary writes the library the way library.json holds it, so a save
+// can hash and compare the exact bytes it wrote.
+func marshalLibrary(songs []song) ([]byte, error) {
+	data, err := json.MarshalIndent(libraryFile{Version: libraryVersion, Songs: songs}, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
+
+// libraryDir is the folder library.json lives in: the one the operator
+// chose, or the app data directory. It is "" before the app is ready.
+func (a *app) libraryDir() string {
+	if a.libraryFolder != "" {
+		return a.libraryFolder
+	}
+	return a.settingsDir
+}
+
 // libraryPath is where the songs live, or "" before the app is ready (and in
 // tests, which never touch the real app data directory).
 func (a *app) libraryPath() string {
-	if a.settingsDir == "" {
+	dir := a.libraryDir()
+	if dir == "" {
 		return ""
 	}
-	return filepath.Join(a.settingsDir, "library.json")
+	return filepath.Join(dir, "library.json")
 }
+
+// errLibraryReloaded says the file on disk won and the in-memory edit was
+// dropped, so a caller can say so instead of claiming a save.
+var errLibraryReloaded = errors.New("library: reloaded from the folder")
 
 // loadLibrary reads library.json, seeding it from the built-in public-domain
 // songs on first launch. A corrupt file is logged and left alone: the
-// built-ins stay usable and the next save replaces it.
+// built-ins stay usable and the next save replaces it, except in a chosen
+// folder, where a file that cannot be read is never written over.
 func (a *app) loadLibrary() {
 	path := a.libraryPath()
 	if path == "" {
@@ -89,39 +116,136 @@ func (a *app) loadLibrary() {
 		a.normalizeLibrary()
 		return
 	}
-	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-		a.songs = cloneSongs(builtinSongs)
-		a.normalizeLibrary()
-		if err := writeLibrary(path, libraryFile{Version: libraryVersion, Songs: a.songs}); err != nil {
-			log.Printf("mygo-demo: seed library: %v", err)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) && a.libraryFolder == "" {
+			a.songs = cloneSongs(builtinSongs)
+			a.normalizeLibrary()
+			if err := a.saveLibrary(); err != nil {
+				log.Printf("mygo-demo: seed library: %v", err)
+			}
+			return
 		}
+		log.Printf("mygo-demo: load library: %v", err)
+		if len(a.songs) == 0 {
+			a.songs = cloneSongs(builtinSongs)
+		}
+		a.normalizeLibrary()
+		a.blockLibrary("The songs folder could not be read, so the songs are not saved over.")
 		return
 	}
-	f, err := readLibrary(path)
+	f, err := decodeLibrary(data)
 	if err != nil {
 		log.Printf("mygo-demo: load library: %v", err)
 		if len(a.songs) == 0 {
 			a.songs = cloneSongs(builtinSongs)
 		}
 		a.normalizeLibrary()
+		a.blockLibrary("The songs file could not be read, so it is not saved over.")
 		return
 	}
 	a.songs = f.Songs
 	a.normalizeLibrary()
+	a.libraryStamp = hashBytes(data)
+	a.libraryBlocked = false
+	a.libraryNote = ""
+}
+
+// blockLibrary stops every later write, so a file the app does not
+// understand is not replaced by a seed.
+func (a *app) blockLibrary(note string) {
+	a.libraryBlocked = true
+	a.libraryNote = note
 }
 
 // saveLibrary writes the whole library and reports a failure, so the editor
 // can say the words are not on disk instead of claiming they are. A missing
 // path is a headless test or a window before the app is ready: nothing to do.
+// In a chosen folder the file is checked first: if another machine or a sync
+// client wrote it since this app read it, the operator decides which copy
+// wins before anything is replaced.
 func (a *app) saveLibrary() error {
 	path := a.libraryPath()
 	if path == "" {
 		return nil
 	}
-	if err := writeLibrary(path, libraryFile{Version: libraryVersion, Songs: a.songs}); err != nil {
+	if a.libraryBlocked {
+		return errors.New(a.libraryNote)
+	}
+	if a.libraryFolder != "" {
+		if err := a.checkForeignLibrary(); err != nil {
+			return err
+		}
+	}
+	data, err := marshalLibrary(a.songs)
+	if err != nil {
 		return err
 	}
+	if err := writeFileAtomic(path, data); err != nil {
+		return err
+	}
+	a.libraryStamp = hashBytes(data)
 	a.snapshotDaily()
+	return nil
+}
+
+// checkForeignLibrary compares the file with what this app last read or
+// wrote. A file it cannot read is a conflict too: writing over it blindly is
+// how a synced library disappears.
+func (a *app) checkForeignLibrary() error {
+	data, err := os.ReadFile(a.libraryPath())
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if a.libraryStamp == "" || hashBytes(data) == a.libraryStamp {
+		return nil
+	}
+	return a.resolveLibraryConflict(data)
+}
+
+// resolveLibraryConflict asks which copy to keep. Reloading adopts the other
+// file and reports errLibraryReloaded; keeping this app's songs saves the
+// other copy in backups/ and lets the write continue.
+func (a *app) resolveLibraryConflict(data []byte) error {
+	ask := a.askMessage
+	if ask == nil {
+		ask = mygo.Dialog.Message
+	}
+	res, err := ask(mygo.MessageOptions{
+		Type:         mygo.MessageWarning,
+		Title:        "The songs folder changed",
+		Message:      "Another program or machine changed the songs file.",
+		Detail:       "Reload it to use those songs, or keep the songs here and save the other copy in the backups folder.",
+		Buttons:      []string{"Reload the file", "Keep my songs"},
+		CancelButton: -1,
+	})
+	if err != nil {
+		return err
+	}
+	if res.Button == 0 {
+		f, err := decodeLibrary(data)
+		if err != nil {
+			return fmt.Errorf("the changed file could not be read: %w", err)
+		}
+		a.songs = f.Songs
+		a.normalizeLibrary()
+		a.editQuery = ""
+		a.editSong, a.editPart, a.editSlide = 0, 0, 0
+		a.clampEditor()
+		a.libraryStamp = hashBytes(data)
+		a.libraryNote = "Reloaded " + songCount(len(a.songs)) + " from the songs folder."
+		return errLibraryReloaded
+	}
+	if _, err := a.snapshotBytes("conflict", data); err != nil {
+		log.Printf("mygo-demo: keep the other songs copy: %v", err)
+	}
+	// The write that follows replaces the other copy, so its stamp is the
+	// one to beat.
+	a.libraryStamp = hashBytes(data)
+	a.libraryNote = ""
 	return nil
 }
 

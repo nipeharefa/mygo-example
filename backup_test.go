@@ -332,7 +332,7 @@ func TestRestoreFromTheSettingsPage(t *testing.T) {
 	a.signedIn = true
 	a.page = pageSettings
 	a.openFile = func(mygo.OpenDialogOptions) ([]string, error) { return []string{path}, nil }
-	tt := ui.NewTester(a.settingsBody, 900, 800)
+	tt := ui.NewTester(a.settingsBody, 900, 1400)
 	if err := tt.Click("Restore…"); err != nil {
 		t.Fatal(err)
 	}

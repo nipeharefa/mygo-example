@@ -46,6 +46,11 @@ element or a context:
 | `songQuery`, `verseQuery`, `pack` | library filters; `pack` is the selected verse pack name |
 | `deck []slide`, `preview int`, `stage int` | the run of show, the tile selected in the monitor, and the slide on air |
 | `showSaved string`, `showBlocked bool`, `showNote string` | what `show.json` last held, whether it may not be overwritten, and the note that says why |
+| `libraryFolder string`, `libraryStamp string` | the chosen songs folder (`""` is the app data directory) and the hash of the library file this app last read or wrote |
+| `libraryBlocked bool`, `libraryNote string` | whether a file the app cannot read stops saving, and why |
+| `folderNote string`, `folderNoteErr bool`, `folderWaiting *folderPlan` | the folder card's note, and the folder the Settings page is asking about |
+| `saveFile`, `openFile`, `askMessage` | the native dialogs, all nil in the app and stubbed in tests |
+| `backupDay string`, `backupNote string`, `backupNoteErr bool`, `restoreWaiting *restorePlan` | the day's snapshot is taken once, the Data card's note, and the backup the page is asking about |
 | `blackout bool` | the stage shows a black frame, deck unchanged |
 | `nextID int` | slide id counter |
 | `menuOpen bool` | the Account pane in the top bar is open |
@@ -479,9 +484,11 @@ least one part; `data_test.go` and `deck_test.go` assert these.
 
 ## What is saved
 
-Three small JSON files in the app data directory, all written through
+Three small JSON files, all written through
 `writeFileAtomic` (a temporary file beside the target, a sync, a rename),
-plus the `backups/` folder described below:
+plus the `backups/` folder described below. All of them live in the app data
+directory except `library.json`, which follows the chosen songs folder when
+there is one:
 
 - `settings.json` — display id, NDI on/off, the NDI frame size, the update
   channel.
@@ -530,6 +537,36 @@ bare `library.json` too, and a person can read the file.
   the page, or signing out drops the question.
 - The dialogs go through `a.saveFile`/`a.openFile`, which are nil in the
   app and stubbed in tests: no test opens a native dialog.
+
+### A folder two machines share
+
+There is no network in the app, so "sync" is a folder the operating system
+already syncs: iCloud Drive, Dropbox, OneDrive. **Songs folder** on the
+Settings page picks it, and `a.libraryFolder` remembers it in
+`settings.json`. Only `library.json` moves: the run of show, the
+preferences and the backups stay with this machine, because a set is built
+locally and a backups folder is one machine's history.
+
+- `libraryDir` returns the chosen folder or the app data directory, and
+  `libraryPath` reads `library.json` from it.
+- Choosing a folder reads what is there. If it holds a library, the page
+  asks whether to use those songs (backing up the current ones first) or
+  to keep the ones here and write them there. Nothing moves until the
+  answer; **Cancel**, leaving the page or signing out drops it.
+- A folder that is gone, or a library that cannot be read, opens
+  read-only: `a.libraryBlocked` refuses every save and `a.libraryNote`
+  says why, rather than seeding built-ins over a library that might be
+  the real one.
+- Before each write in a chosen folder, `saveLibrary` hashes the file and
+  compares it with `a.libraryStamp`, the hash of what this app last read
+  or wrote. A difference means another machine or the sync client changed
+  it, and `a.askMessage` asks: **Reload the file** adopts it (the edit in
+  hand is dropped, and the editor says so) or **Keep my songs** writes this
+  copy and saves the other as `backups/conflict-…json`. Only the folder is
+  guarded; the app's own file needs no check.
+- There is no watcher: a write is checked, at launch the file is read, and
+  **Reload** on the card pulls a saved file in while the app runs. The card
+  says to edit on one machine at a time.
 
 ## Rendering details worth knowing
 
@@ -595,6 +632,12 @@ tests must not press **Open output**).
   a restore that asks before it changes anything, its safety copy, a plain
   library keeping the deck, a bad file refused, cancel, and the question
   answered from the Settings page.
+- `sync_test.go` — the folder in `settings.json` and the library following
+  it, a fresh folder taking the songs here, a folder's songs adopted,
+  cancel, a bad library refused, a missing folder read-only, the app's
+  folder taken back, a conflict reloaded and a conflict kept with the other
+  copy saved, no question for this app's own writes, **Reload**, and the
+  folder card with its question.
 - `slideview_test.go` — `stageScale` and the metrics at full and half width.
 - `editor_test.go` — the editor window lifecycle (request, settle, close,
   sign-out, `changed()` nil-safety), the console button, empty and filtered
@@ -702,6 +745,10 @@ agent session, prefix Go commands with `GOCACHE="$TMPDIR/gocache-mygo-demo"`.
 - **No undo/redo.** A mistaken removal in the editor or the deck can be
   recovered only from the `backups/` folder or by hand. One bundle a day is
   kept, 14 days.
+- **Sync is a folder, not a service.** Two machines share `library.json`
+  through iCloud Drive or Dropbox, one at a time; the run of show does not
+  travel. There is no watcher, so a file changed while the app is open is
+  picked up at the next save's prompt or with **Reload**.
 
 The MyGo lifetime and identity rules, and the widget inventory this app
 was written against, are in

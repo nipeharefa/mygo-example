@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -707,8 +708,12 @@ func (a *app) setTextSize(v float64) {
 // when the edit can show there.
 func (a *app) saveNote(note string, console bool) {
 	if err := a.saveLibrary(); err != nil {
-		a.editorStatus = "Could not save: " + err.Error()
 		a.editorStatusErr = true
+		if errors.Is(err, errLibraryReloaded) {
+			a.editorStatus = "Reloaded the songs folder; this change was not kept."
+		} else {
+			a.editorStatus = "Could not save: " + err.Error()
+		}
 	} else {
 		a.editorStatus = note
 		a.editorStatusErr = false

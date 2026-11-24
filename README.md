@@ -117,7 +117,7 @@ so a chorus can follow every verse without another copy of the song.
 The run of show keeps the words it was given: editing a slide later does not
 rewrite a slide already added. Add the song again to use the new words.
 
-## Backing up and moving songs
+## Backing up and syncing
 
 Settings > Data keeps the work safe without a Save button.
 
@@ -131,6 +131,19 @@ Settings > Data keeps the work safe without a Save button.
   songs it holds, and asks before it replaces anything. The songs and the set
   you have now are copied into `backups` first, so a wrong pick costs a few
   seconds, not the library.
+
+Settings > **Songs folder** is the sync: pick a folder your cloud app
+already syncs, such as iCloud Drive or Dropbox, and the app keeps
+`library.json` there. The run of show, the preferences and the backups stay
+with each machine, since a set is built locally. The app has no network of
+its own; the folder is what carries the songs.
+
+Edit on one machine at a time. Before every save the app checks that the
+file is the one it last read or wrote; if another machine changed it, the
+app asks whether to **Reload the file** or **Keep my songs**, and whichever
+copy loses is saved in `backups` as a conflict file, not thrown away.
+**Reload** on the card pulls in a file another machine saved while this one
+was open.
 
 The same folder holds `library.json`, the songs, and `show.json`, the run of
 show. Both are plain JSON, so they can be read and copied without the app.

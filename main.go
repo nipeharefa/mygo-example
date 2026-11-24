@@ -71,10 +71,22 @@ type app struct {
 	// and the restore the operator is being asked about.
 	saveFile       func(mygo.SaveDialogOptions) (string, error)
 	openFile       func(mygo.OpenDialogOptions) ([]string, error)
+	askMessage     func(mygo.MessageOptions) (mygo.MessageResult, error)
 	backupDay      string
 	backupNote     string
 	backupNoteErr  bool
 	restoreWaiting *restorePlan
+
+	// The songs folder: empty means the app data directory, and a chosen
+	// folder carries the stamp of the file this app last read or wrote, so
+	// another machine's write is noticed before it is replaced.
+	libraryFolder  string
+	libraryStamp   string
+	libraryBlocked bool
+	libraryNote    string
+	folderNote     string
+	folderNoteErr  bool
+	folderWaiting  *folderPlan
 
 	win  *mygo.Window
 	live *mygo.Window
@@ -160,7 +172,8 @@ func newApp() *app {
 		updateDl: func(ctx context.Context, up *mygo.Update, progress func(downloaded, total int64)) error {
 			return up.Install(ctx, progress)
 		},
-		updateRun: func() { mygo.App.Relaunch() },
+		updateRun:  func() { mygo.App.Relaunch() },
+		askMessage: mygo.Dialog.Message,
 	}
 	a.songs = cloneSongs(builtinSongs)
 	a.editSong, a.editPart, a.editSlide = -1, -1, -1
@@ -203,6 +216,8 @@ func (a *app) signOut() {
 	a.editorStatus, a.editorStatusErr = "", false
 	a.newSongOpen, a.pasteOpen, a.confirmRemoveSong = false, false, false
 	a.restoreWaiting = nil
+	a.folderWaiting = nil
+	a.folderNote, a.folderNoteErr = "", false
 	a.backupNote, a.backupNoteErr = "", false
 }
 

@@ -1,9 +1,18 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 )
+
+// hashBytes identifies a file's content, so a writer can tell whether the
+// file it is about to replace is the one it read.
+func hashBytes(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
 
 // writeFileAtomic replaces a file in one step: the bytes go to a temporary
 // file beside it, are flushed, and the rename makes them the file. A crash,

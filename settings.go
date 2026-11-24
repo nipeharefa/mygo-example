@@ -26,6 +26,10 @@ type settings struct {
 	// as the newest stable one. 0 asks for stable only, which is the default:
 	// a missing key reads as 0.
 	UpdateChannel int `json:"updateChannel"`
+	// LibraryFolder is where library.json lives when it is not the app's
+	// own folder, as an iCloud Drive or Dropbox folder two machines share.
+	// Empty means the app data directory.
+	LibraryFolder string `json:"libraryFolder,omitempty"`
 }
 
 // legacySettings is the file written before the display key was named
@@ -89,6 +93,7 @@ func (a *app) loadSettings() {
 	a.ndiOn = s.NDI
 	a.ndiResolution = s.NDIResolution
 	a.updateChannel = s.UpdateChannel == updateChannelBeta
+	a.libraryFolder = s.LibraryFolder
 	// Only drop the saved display when the list is known: startup fills it
 	// before loading, while a headless test may leave it empty.
 	if len(a.displays) > 0 && a.stageDisplay != 0 && !a.hasDisplay(a.stageDisplay) {
@@ -108,6 +113,7 @@ func (a *app) saveSettings() {
 		NDI:           a.ndiOn,
 		NDIResolution: a.ndiResolution,
 		UpdateChannel: updateChannelOf(a.updateChannel),
+		LibraryFolder: a.libraryFolder,
 	})
 	if err != nil {
 		log.Printf("mygo-demo: save settings: %v", err)
@@ -169,6 +175,7 @@ func (a *app) showSettings() {
 func (a *app) showConsole() {
 	a.page = pageConsole
 	a.restoreWaiting = nil
+	a.folderWaiting = nil
 	a.changed()
 }
 
@@ -231,9 +238,68 @@ func (a *app) settingsBody(c *ui.Context) {
 					a.ndiStatsSection(c)
 				})
 
+				// Songs folder
+				settingsCard(c, "Songs folder", "Where the library lives, and what syncs it.", func() {
+					ui.Text(c, "A folder your cloud app already syncs, such as iCloud Drive or Dropbox, moves the songs between machines. The run of show and these preferences stay with this machine.").
+						FontSize(textBody).TextColor(t.TextMuted)
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
+						label := "Choose a folder…"
+						if a.libraryFolder != "" {
+							label = "Change folder…"
+						}
+						ui.Button(c, label).Label("Choose the songs folder").OnClick(a.chooseSongsFolder)
+						if a.libraryFolder != "" {
+							ui.Button(c, "Use the app's folder").OnClick(a.useAppFolder)
+							ui.Button(c, "Reload").Label("Reload the songs folder").OnClick(a.reloadLibrary)
+						}
+					})
+					dir := a.libraryDir()
+					shown := "the app data directory"
+					if dir != "" {
+						shown = dir
+					}
+					ui.Text(c, "Songs file: "+filepath.Join(shown, "library.json")).
+						FontSize(textSmall).TextColor(t.TextMuted).SingleLine()
+					ui.Text(c, "Edit on one machine at a time. The app checks the file before it writes and asks if another machine changed it.").
+						FontSize(textSmall).TextColor(t.TextMuted)
+					if a.libraryNote != "" {
+						color := t.TextMuted
+						if a.libraryBlocked {
+							color = t.Danger
+						}
+						ui.Text(c, a.libraryNote).FontSize(textSmall).TextColor(color)
+					}
+					if a.folderNote != "" {
+						color := t.TextMuted
+						if a.folderNoteErr {
+							color = t.Danger
+						}
+						ui.Text(c, a.folderNote).FontSize(textSmall).TextColor(color)
+					}
+					if p := a.folderWaiting; p != nil {
+						ui.Column(c).Gap(8).Padding(12).Radius(8).Background(sunken(t)).Border(1, hairlines(t)).Children(func() {
+							if p.Existing != nil {
+								ui.Text(c, fmt.Sprintf("Use the %s in %s here? Your current songs are copied to the backups folder first.",
+									songCount(len(p.Existing.Songs)), p.Dir)).FontSize(textBody).FontWeight(600)
+								ui.Row(c).Gap(8).Children(func() {
+									ui.Button(c, "Cancel").OnClick(a.cancelFolder)
+									ui.PrimaryButton(c, "Use those songs").OnClick(a.confirmFolder)
+								})
+								return
+							}
+							ui.Text(c, fmt.Sprintf("Keep the %s here in %s?", songCount(len(a.songs)), p.Dir)).
+								FontSize(textBody).FontWeight(600)
+							ui.Row(c).Gap(8).Children(func() {
+								ui.Button(c, "Cancel").OnClick(a.cancelFolder)
+								ui.PrimaryButton(c, "Use this folder").OnClick(a.confirmFolder)
+							})
+						})
+					}
+				})
+
 				// Data
 				settingsCard(c, "Data", "What survives a restart, and how to keep it.", func() {
-					ui.Text(c, "The songs, the run of show and the preferences save as you work, in the app data directory. One copy of each day's work is kept automatically; a backup is one file you can copy to another machine.").
+					ui.Text(c, "The songs, the run of show and the preferences save as you work. One copy of each day's work is kept automatically; a backup is one file you can copy to another machine.").
 						FontSize(textBody).TextColor(t.TextMuted)
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
 						ui.Button(c, "Back up…").Label("Back up songs and run of show").OnClick(a.backUpSongs)

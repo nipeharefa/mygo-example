@@ -129,6 +129,22 @@ func (a *app) snapshotNow(prefix string) (string, error) {
 	return path, nil
 }
 
+// snapshotBytes keeps bytes this app is not keeping, such as the losing side
+// of a synced-folder conflict, before they are replaced.
+func (a *app) snapshotBytes(prefix string, data []byte) (string, error) {
+	dir := a.backupDir()
+	if dir == "" {
+		return "", nil
+	}
+	name := fmt.Sprintf("%s-%s.json", prefix, time.Now().Format("2006-01-02-150405"))
+	path := filepath.Join(dir, name)
+	if err := writeFileAtomic(path, data); err != nil {
+		return "", err
+	}
+	a.pruneBackups()
+	return path, nil
+}
+
 // pruneBackups throws away the oldest daily snapshots past backupKeep and
 // the oldest safety copies past conflictKeep. It never fails a save: a
 // backup that could not be pruned costs space, not data.
