@@ -75,11 +75,24 @@ type app struct {
 	editPart          int
 	editSlide         int
 	editorStatus      string
+	editorStatusErr   bool // editorStatus is a refusal or a failed save
 	editQuery         string
-	editorShowPart    bool   // the Part fields are folded open
-	editorShowDetails bool   // the Song details fields are folded open
-	settingsDir       string // app data dir; empty keeps tests headless
-	version           string // mygo.App.Version(); empty under go run
+	editorTab         int  // which desk tab the editor shows
+	newSongOpen       bool // the New song dialog is open
+	newSongTitle      string
+	newSongAuthor     string
+	newSongKey        string
+	newSongPart       string
+	newSongWords      string
+	pasteOpen         bool // the Paste words dialog is open
+	pasteText         string
+	confirmRemoveSong bool // the Song tab is asking before deleting
+	// editorFocus is the slide whose text should take the caret, as a key
+	// shared with the text area's FocusBind: choosing, adding or opening a
+	// slide puts the caret there, and clicking elsewhere hands it back.
+	editorFocus string
+	settingsDir string // app data dir; empty keeps tests headless
+	version     string // mygo.App.Version(); empty under go run
 
 	// Updates, as the Help menu offers them: the context a check runs under
 	// (so quitting cancels it), whether this build can replace itself, and
@@ -135,7 +148,7 @@ func newApp() *app {
 	}
 	a.songs = cloneSongs(builtinSongs)
 	a.editSong, a.editPart, a.editSlide = -1, -1, -1
-	a.editorShowPart, a.editorShowDetails = true, true
+	a.editorTab = editorSlideTab
 	a.addSong("amazing-grace")
 	a.addVerse("Psalm 23:1")
 	a.preview, a.stage = 0, 0
@@ -170,6 +183,9 @@ func (a *app) signOut() {
 	a.authErr = ""
 	a.blackout = false
 	a.preview, a.stage = 0, 0
+	a.editorTab = editorSlideTab
+	a.editorStatus, a.editorStatusErr = "", false
+	a.newSongOpen, a.pasteOpen, a.confirmRemoveSong = false, false, false
 }
 
 // clearAuthError hides a stale error as soon as either field changes.

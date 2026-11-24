@@ -85,20 +85,36 @@ the project's key, so an app accepts only updates it can verify.
 ## Editing songs
 
 **Song editor** in the console header opens a separate window for the song
-library. Pick a song in the left list, a slide in the middle list, and edit it
-in the inspector on the right; **Part** and **Song details** fold away with
-their **Show** / **Hide** control. A song has an author, a key, a text size, and
-one or more **parts** (a verse, a chorus, a bridge); each part holds one or
-more **slides**, and a slide is the text that fills one stage frame. **Add
-song** puts every part in the run of show in order; a part's **Add part to
-run of show** adds it again where the arrangement needs it, so a chorus can
-follow every verse without another copy of the song.
+library. It is three zones: the library on the left, the selected song's
+structure in the middle, and the slide desk on the right. A song has an author,
+a key, a text size, and one or more **parts** (a verse, a chorus, a bridge);
+each part holds one or more **slides**, and a slide is the text that fills one
+stage frame.
 
-Every edit saves to `library.json` in the app data directory, so a song
-written once survives a restart. A first launch seeds that file from the
-five built-in hymns. **Restore samples** brings back any built-in song whose
-id the library lost and never overwrites a song you edited. **New song**
-starts an empty draft, and **Remove song** drops the selected one.
+**New song** asks for a title, author, key and first part, and takes the words
+too: one blank line starts a new slide. **Add part** continues the verse
+numbering, or names a plain part when the labels are not verses. **Paste words**
+under the slide text turns a whole verse into slides the same way. Choosing a
+song, a slide or a part puts the caret in the words, so the next key is a
+lyric; **Add slide below** inserts and focuses the new slide.
+
+**Slide** is the working tab: the part and slide number with **‹** / **›**, the
+preview as the room sees it, the words, then **Add slide below**,
+**Duplicate**, **Paste words** and **Remove slide**. The part's own name carries
+**Remove part**, so a verse added by mistake goes from here in one click. **Song**
+holds the title, author, key, text size, the part label and **Add part to run of
+show**, and **Remove song**, which asks before deleting.
+
+Every edit saves to `library.json` in the app data directory, and the header
+says **Saved**, or names a write failure. There is no Save button. A first
+launch seeds that file from the five built-in hymns. **Restore samples** at the
+foot of the library brings back any built-in song whose id the library lost and
+never overwrites a song you edited. **Add song to run of show** puts every part
+in the run of show in order; **Add part to run of show** adds just that part,
+so a chorus can follow every verse without another copy of the song.
+
+The run of show keeps the words it was given: editing a slide later does not
+rewrite a slide already added. Add the song again to use the new words.
 
 **Text size** is one number per song, in stage units at the 1280×720 design:
 40 is the built-in size and the slider spans 24 to 72. The editor's 16:9

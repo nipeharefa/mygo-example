@@ -106,16 +106,15 @@ func (a *app) loadLibrary() {
 	a.normalizeLibrary()
 }
 
-// saveLibrary writes the whole library. Failures only cost the next launch's
-// songs, so they are logged rather than shown.
-func (a *app) saveLibrary() {
+// saveLibrary writes the whole library and reports a failure, so the editor
+// can say the words are not on disk instead of claiming they are. A missing
+// path is a headless test or a window before the app is ready: nothing to do.
+func (a *app) saveLibrary() error {
 	path := a.libraryPath()
 	if path == "" {
-		return
+		return nil
 	}
-	if err := writeLibrary(path, libraryFile{Version: libraryVersion, Songs: a.songs}); err != nil {
-		log.Printf("mygo-demo: save library: %v", err)
-	}
+	return writeLibrary(path, libraryFile{Version: libraryVersion, Songs: a.songs})
 }
 
 // normalizeLibrary drops songs that cannot be addressed and pulls every size

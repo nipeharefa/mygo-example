@@ -91,7 +91,35 @@ func TestWriteShots(t *testing.T) {
 			a.preview = 0
 			a.view(c)
 		}},
-		{"editor", 1280, 900, func(c *ui.Context) {
+		{"editor", 1280, 820, func(c *ui.Context) {
+			a := newApp()
+			a.editSong, a.editPart, a.editSlide = 0, 0, 0
+			a.editorView(c)
+		}},
+		{"editor-song", 1280, 820, func(c *ui.Context) {
+			a := newApp()
+			a.editSong, a.editPart, a.editSlide = 0, 0, 0
+			a.editorTab = editorSongTab
+			a.editorView(c)
+		}},
+		{"editor-new-song", 1280, 820, func(c *ui.Context) {
+			a := newApp()
+			a.editSong, a.editPart, a.editSlide = 0, 0, 0
+			a.openNewSong()
+			a.newSongTitle = "Amazing Grace"
+			a.newSongAuthor = "John Newton"
+			a.newSongKey = "G"
+			a.newSongWords = "Amazing grace! how sweet the sound\nThat saved a wretch like me!\n\n'Twas grace that taught my heart to fear,\nAnd grace my fears relieved."
+			a.editorView(c)
+		}},
+		{"editor-paste", 1280, 820, func(c *ui.Context) {
+			a := newApp()
+			a.editSong, a.editPart, a.editSlide = 0, 0, 0
+			a.openPaste()
+			a.pasteText = "Amazing grace! how sweet the sound\nThat saved a wretch like me!\n\n'Twas grace that taught my heart to fear,\nAnd grace my fears relieved."
+			a.editorView(c)
+		}},
+		{"editor-narrow", 1120, 700, func(c *ui.Context) {
 			a := newApp()
 			a.editSong, a.editPart, a.editSlide = 0, 0, 0
 			a.editorView(c)

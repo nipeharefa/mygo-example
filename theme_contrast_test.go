@@ -46,8 +46,12 @@ func TestThemeContrast(t *testing.T) {
 				{"text on background", theme.Text, theme.Background},
 				{"text on surface", theme.Text, theme.Surface},
 				{"text on a hovered row", theme.Text, theme.SurfaceHover},
+				{"text on a raised row", theme.Text, raisedRow(theme)},
+				{"text on the selected row", theme.Text, rowSelected(theme)},
+				{"text on the well", theme.Text, sunken(theme)},
 				{"muted on background", theme.TextMuted, theme.Background},
 				{"muted on surface", theme.TextMuted, theme.Surface},
+				{"muted on a hovered row", theme.TextMuted, theme.SurfaceHover},
 				{"muted on a raised row", theme.TextMuted, raisedRow(theme)},
 				{"muted on the selected row", theme.TextMuted, rowSelected(theme)},
 				{"muted on the well", theme.TextMuted, sunken(theme)},
@@ -56,6 +60,8 @@ func TestThemeContrast(t *testing.T) {
 				{"success on surface", theme.Success, theme.Surface},
 				{"warning on surface", theme.Warning, theme.Surface},
 				{"danger on surface", theme.Danger, theme.Surface},
+				{"danger on background", theme.Danger, theme.Background},
+				{"danger on a hovered row", theme.Danger, theme.SurfaceHover},
 				{"on air on surface", onAirColor(theme), theme.Surface},
 			}
 			for _, p := range pairs {

@@ -34,9 +34,13 @@ identity rules live in
   `stageBackgroundHex` for the output window's background. Everything else
   reads `c.Theme()`, so light and dark appearance and the system accent and
   text-scale preferences keep working.
-- **Mutate state from callbacks, then redraw every window.** Every state
-  method ends with `a.changed()`, which invalidates `a.win`, `a.live`, `a.editor`,
-  `a.settings` and `a.help` (each nil-safe). Call it from
+- **Mutate state from callbacks, then redraw the windows that changed.**
+  Deck and session methods end with `a.changed()`, which invalidates `a.win`,
+  `a.live`, `a.editor`, `a.settings` and `a.help` (each nil-safe). Library
+  edits go through `a.saveNote`/`a.editorRedraw(console bool)`: the editor
+  always, the console only when the change can show there (a title, author,
+  key or a new or removed song). A slide-text keystroke must not repaint the
+  run of show, because the deck keeps its own copy. Call these from
   `OnClick`/`OnSubmit`/`OnChange`/shortcut/menu callbacks, never from
   inside the build pass.
 - **The stage is the output, and NDI publishes only it.** The feed is
@@ -208,7 +212,7 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `data.go` | The seed library: `builtinSongs` (5 public-domain hymns as `song{... Parts []songPart}`), 4 KJV verse packs (16 verses), `findSong`, `verseByRef`, the text-size limits and `clampTextSize`. |
 | `deck.go` | The run-of-show model: `slide` (including its snapshotted `TextSize`), `slideKind`, add/select/next/prev (monitor), `addSongParts`/`addPartSlides`/`addPart`, `takeSlide`/`takeSlideAt`, `nextStage`/`prevStage`, remove/move/blackout (`removeSlideAt`, `moveSlideAt`), `reorderSlides` (the move path, `to` is a gap), `stageSlide`/`previewSlide`/`upcomingSlide`, `clampSlides`. |
 | `library.go` | The song library: `library.json` read/write and versioning, `loadLibrary`/`saveLibrary`, first-launch seeding from `builtinSongs`, `normalizeLibrary`, `cloneSongs`, `newSongID`, and `(a *app) songByID`/`libraryPath`. |
-| `editor.go` | The Song editor window: `requestEditor`/`openEditorWindow`/`closeEditor`, the library list and search, the 16:9 preview, metadata/part/slide editing with immediate saves, text size, new/remove/restore songs, and adding a song or part to the run of show. |
+| `editor.go` | The Song editor window: `requestEditor`/`openEditorWindow`/`closeEditor`, the library card and search, the part/slide outline, the Slide/Song desk (`editorSlideDesk` with the preview, the text area and the header's **Remove part**, `editorSongDesk` with the details and the delete confirmation), `FocusBind` through `editorFocus`, `saveNote`/`editorRefused`, the New song and Paste words dialogs (`splitSlides`, `nextPartLabel`), and adding a song or part to the run of show. |
 | `slideview.go` | The shared slide renderer: `stageDesignWidth`/`Height`, `stageScale`, `slideMetrics`/`metricsFor`, and `slideBody`, used by the stage window, the NDI feed, the editor preview and the run of show's tiles. It draws the slide's text alone: the output carries no part label or song caption. |
 | `console.go` | The console view: top bar (including **Song editor** and the **Account** pane holding Settings, Check for Updates and Sign out), library (Songs/Bible tabs, search, pack picker), the run of show as a grid of whole-slide tiles grouped under each song (`deckGroups`, `deckGrid`, `deckTile`) with a go-live/move/remove toolbar per tile and drag-to-reorder on the picture (`deckDrag`, `dragLandsAfter`, `pendingDrop` applied by `settle`), the two-card stage/monitor panel with Go Live, and the login card. |
 | `output.go` | The stage window: `liveView`, stage shortcuts, `openOutput`/`closeOutput`/`togglePresent`, `placeStage`/`shutStage`. |
@@ -222,7 +226,7 @@ directory, for example `GOCACHE="$TMPDIR/gocache-mygo-demo"`, because
 | `library_test.go` | The library file without a window: round-trip, version/duplicate rejection, seeding, corrupt files, empty lists, normalization, clones, new ids. |
 | `data_test.go` | The built-in seeds: parts and slides, the All Creatures split, text-size defaults/clamps, slide counts, `findSong`. |
 | `slideview_test.go` | The shared renderer's scale and metrics at full and half width. |
-| `editor_test.go` | The editor headless: window lifecycle, console button, list/search/selection/width, metadata/slide edits that save, part and slide guards, text size, new/remove/restore, add-to-show, and the deck staying a snapshot. |
+| `editor_test.go` | The editor headless: window lifecycle, console button, list/search/selection/width, tabs, typing (focus on open, song, slide and add; live preview; per-slide text; undo), save failures, split/duplicate/paste, part naming, part and slide guards (including removing a part or an empty part from the Slide tab), the song delete confirmation, new/remove/restore, add-to-show, and the deck staying a snapshot. |
 | `menu_test.go` | Headless menu structure: item IDs, accelerator, click handlers present (clicks not run). |
 | `settings_test.go` | Settings round-trip (display, NDI, frame size), missing/corrupt defaults, legacy `outputDisplay` migration, `stageDisplayFound`, the Settings page rendering, display refresh without reopening the stage. |
 | `deck_test.go` | Headless model tests: data reachability, ids, clamping, reorder, blackout, `changed()` without windows. |

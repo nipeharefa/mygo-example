@@ -51,7 +51,11 @@ element or a context:
 | `songs []song` | the song library, loaded from `library.json` or seeded from `builtinSongs` |
 | `openEditor bool` | the current frame asked to open the Song editor after it is built |
 | `editSong`, `editPart`, `editSlide int` | what the Song editor has selected; −1 means nothing is selected |
-| `editQuery`, `editorStatus string` | the editor's song filter and its last save/add note |
+| `editQuery`, `editorStatus string`, `editorStatusErr bool` | the editor's song filter, its last save/add note, and whether that note is a refusal or a failed save |
+| `editorTab int` | which desk tab the editor shows: Slide or Song |
+| `editorFocus string` | the slide whose text should hold the caret, shared with the text area's `FocusBind` |
+| `newSongOpen`, `pasteOpen`, `confirmRemoveSong bool` | the editor's New song dialog, Paste words dialog, and the delete confirmation |
+| `newSongTitle`, `newSongAuthor`, `newSongKey`, `newSongPart`, `newSongWords`, `pasteText string` | the dialogs' fields |
 | `displays []mygo.Display`, `stageDisplay int64` | the display list and the chosen stage display (0 = a window) |
 | `stageDisplayUsed int64` | the display the open stage was actually placed on |
 | `page int` | `pageConsole` or `pageSettings` |
@@ -278,26 +282,69 @@ one with `a.newWindow` — Title `mygo-demo · Song editor`, 1280×820, minimum
 `OnClosed` guard of `if a.editor != w { return }`. `closeEditor` nils the
 pointer before `Close()`, so a stale close cannot drop a new window.
 
-The window is three columns: a 220-wide song list (search, `New song`,
-`Restore samples`, one clickable row per song), a 260-wide slide list (one
-header per part, one row per slide), and a scrolling inspector with the 16:9
-preview, the selected slide's text, the selected part's label, and the song's
-title, author, key and text size. The preview is capped at 420 wide and
-floored at 360, and `previewWidth` derives that from `c.Size()`. `editorPreview`
-draws the slide through the same `slideBody` and `metricsFor` as `liveView`, so
-what the editor shows is what the stage shows at that size. The **Part** and
-**Song details** headings carry a `Hide` / `Show` hint and fold their controls
-away; the choice lasts for the window, not for `library.json`.
+The window is three zones with the console's surfaces: a 248-wide library
+card (`Surface`; search, **New song**, one row per song, **Restore samples**
+at the foot), a 300-wide outline in the console's sunken well, and a desk
+card that grows. The header names the selected song (`Amazing Grace · John
+Newton · G`) and shows the last save note, in `t.Danger` when it is a refusal
+or a failed write.
 
-Every metadata field, label, text area and the slider updates the `songs`
-model and calls `songEdited`/`setTextSize`, which clamp the size, save the
-whole `library.json` and set `editorStatus` immediately; there is no Save
-button. `addEditorSongToDeck` adds every part through `addSongParts`, and
+`New song` opens a modal: title, author, key, the first part's label, and an
+optional words box. `splitSlides` cuts the words at blank lines into one slide
+per block; with no words the song starts on one blank slide. `createSong`
+makes the id with `newSongID`, selects the song, and puts the caret in its
+first slide. A title is required, and **Create song** is disabled without one.
+
+The outline is the song's structure: one part heading (`Verse 1`) with its
+slide count, then one row per slide with its number and first line. A part
+heading is a label rather than a selected row, so a part never looks like a
+slide; the selected slide alone carries the tint and edge. **Add part** sits
+at the foot of the outline and names the part after the verses already there
+(`nextPartLabel`: Verse 1 becomes Verse 2, otherwise Part N).
+
+The desk has two tabs. **Slide** is the working surface: the part and slide
+number with a quiet **Remove part** and **‹** / **›** (which cross part
+boundaries), the 16:9 preview
+through the same `slideBody` and `metricsFor` as the stage, a visible **Slide
+text** label, the text area, and the actions: **Add slide below** (inserts
+after the current slide), **Duplicate**, **Paste words**, and a quiet **Remove
+slide**. The text area grows to fill the desk (minimum 150) instead of sitting
+in a 130-pixel box inside a scroll. **Paste words** opens a modal; `applyPaste`
+replaces a part that is still one empty slide and appends to any other, and
+`splitSlides` is the only rule: one blank line, one slide. `previewWidth`
+caps the preview at 420 and floors it at 280 from the desk width.
+
+The **Song** tab holds title, author, key, text size, the selected part's label
+and **Add part to run of show** / **Remove part**, then the library note and
+**Remove song**. Deleting a song is the one removal that asks first: the quiet
+action swaps in **Keep song** / **Delete song**. **Remove part** and **Remove
+slide** stay immediate; a part with an empty slide is removable like any other,
+from either tab. They only refuse to empty their container, and each refusal
+names the action that does work: the last slide says **Remove part** deletes
+the part, and the last part says to delete the song. A song therefore always
+keeps one part with one slide to type into.
+
+Typing is the point of the window. `selectSong`, `selectEditorSlide`,
+`addSlide`, `duplicateEditorSlide`, `createSong`, `applyPaste` and the removes
+call `focusEditorText`, which sets `editorFocus` to the slide's key; the text
+area's `FocusBind` takes the caret, waits when the window is not open yet, and
+hands the caret back when the operator clicks the search field or a tab. The
+text area has a per-slide `c.Key`, so each slide keeps its own undo history.
+
+`slideTextEdited` saves the library and repaints only the editor: the console
+shows the deck, which keeps its own copy, so a keystroke that only changes a
+library slide need not redraw the run of show. `songEdited` (title, author,
+key, part label) and `setTextSize` save too; `songEdited` repaints the console
+because the library row shows the title, author and key. `saveNote` reports
+the truth, the note on success or `Could not save: …` in the danger color.
+There is no Save button.
+
+`addEditorSongToDeck` adds every part through `addSongParts`, and
 `addEditorPartToDeck` adds only the selected part through `addPartSlides`;
 both leave the stage row alone and put the monitor on the first added slide.
-Removing the last part or the last slide is refused with a status note. The
-editor does not persist the run of show: a slide copies its text and text
-size when added, so later edits do not rewrite what is already on the list.
+The run of show keeps the words it was given: a slide copies its text and text
+size when added, so later editor changes do not rewrite it. The desk says so
+under the actions and in the Song tab.
 
 ### Updates
 
@@ -480,10 +527,14 @@ tests must not press **Open output**).
 - `slideview_test.go` — `stageScale` and the metrics at full and half width.
 - `editor_test.go` — the editor window lifecycle (request, settle, close,
   sign-out, `changed()` nil-safety), the console button, empty and filtered
-  lists, selection and preview, preview width clamping, metadata and slide
-  text editing that saves, part and slide add/remove with the last-one
-  guard, text size clamping, new/remove/restore songs, and adding a song or
-  one part to the run of show without touching the stage.
+  lists, selection and preview, preview width clamping, tabs, the typing path
+  (caret on open, on a song, on a slide and on **Add slide below**, the live
+  preview, per-slide text and undo), a failed save shown in the header, the
+  split/duplicate/paste path, part naming, part and slide add/remove with the
+  last-one guard (and removing a part, empty or not, from the Slide tab), the
+  song delete confirmation, text size clamping,
+  new/remove/restore songs, and adding a song or one part to the run of show
+  without touching the stage.
 - `settings_test.go` — the settings round-trip, missing and corrupt files,
   the empty `settingsDir` no-op, the legacy `outputDisplay` key, dropping a
   display that went away, `stageDisplayFound`, the Settings page with and
@@ -507,8 +558,9 @@ tests must not press **Open output**).
 
 ## Adding a song or a verse
 
-For a song, use **Song editor** in the app: `New song`, fill the title,
-author and key, add parts and slides, and set the text size. It saves to
+For a song, use **Song editor** in the app: **New song** asks for the title,
+author, key, first part and optional words (one slide per blank line); add
+parts and slides, and set the text size in the Song tab. It saves to
 `library.json` and the console lists it on the next pass. A built-in seed
 goes in `builtinSongs` in `data.go` with a unique `ID`, a title, an author,
 a key, at least one part with one slide, and `TextSize: 0` for the default;
