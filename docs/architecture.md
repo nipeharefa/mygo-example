@@ -480,7 +480,8 @@ least one part; `data_test.go` and `deck_test.go` assert these.
 ## What is saved
 
 Three small JSON files in the app data directory, all written through
-`writeFileAtomic` (a temporary file beside the target, a sync, a rename):
+`writeFileAtomic` (a temporary file beside the target, a sync, a rename),
+plus the `backups/` folder described below:
 
 - `settings.json` — display id, NDI on/off, the NDI frame size, the update
   channel.
@@ -503,6 +504,32 @@ build quietly flattening a newer set.
 This is not a document model, so there is no Save button and no untitled
 state. The run of show is saved as it is built, which is what a service
 needs when the machine is closed between rehearsal and the meeting.
+
+### Backups
+
+`backup.go` keeps a folder beside those files, `backups/`, of one-file
+bundles: `{version, app, saved, library, show}`. The library and the show
+halves are the same documents the app writes, so `decodeBackup` accepts a
+bare `library.json` too, and a person can read the file.
+
+- `snapshotDaily` runs after a successful library or show save. It writes
+  `backup-YYYY-MM-DD.json` once per process-day and does nothing on the
+  other saves in that day; `a.backupDay` is the cached date, so the
+  per-keystroke save costs a string compare. `pruneBackups` keeps the 14
+  newest daily files and the 20 newest safety copies (before-restore copies,
+  and the conflict copies a synced folder makes).
+- **Back up…** on the Settings page asks the native save dialog for a path
+  and writes the same bundle there, named for the day. This is the file to
+  move with AirDrop or a USB stick.
+- **Restore…** asks the native open dialog, reads and validates the file
+  (version, ids, slide kinds, and an 8 MB cap), and puts a question on the
+  Data card: how many songs are here now, how many the file holds, and
+  whether it carries a run of show. **Replace** writes
+  `backups/before-restore-…json` first, then sets the songs, normalizes
+  them, and applies the backup's show when it has one. **Cancel**, leaving
+  the page, or signing out drops the question.
+- The dialogs go through `a.saveFile`/`a.openFile`, which are nil in the
+  app and stubbed in tests: no test opens a native dialog.
 
 ## Rendering details worth knowing
 
@@ -561,6 +588,13 @@ tests must not press **Open output**).
 - `store_test.go` — `writeFileAtomic` replaces in one step, leaves no
   temporary file, keeps the old file when the write fails, creates the
   directory, and writes 0644.
+- `backup_test.go` — the bundle round-trip, a plain library accepted, a
+  newer bundle refused, exactly one daily snapshot a day (from a library
+  save and from a show save), pruning 20 dailies to 14 and 25 safety copies
+  to 20, the chosen file written with its count, cancel and a dialog error,
+  a restore that asks before it changes anything, its safety copy, a plain
+  library keeping the deck, a bad file refused, cancel, and the question
+  answered from the Settings page.
 - `slideview_test.go` — `stageScale` and the metrics at full and half width.
 - `editor_test.go` — the editor window lifecycle (request, settle, close,
   sign-out, `changed()` nil-safety), the console button, empty and filtered
@@ -665,8 +699,9 @@ agent session, prefix Go commands with `GOCACHE="$TMPDIR/gocache-mygo-demo"`.
   is a button or a menu item.
 - **One stage window and one monitor.** Opening the stage again focuses
   the existing one; there is no multi-output or per-display preview feature.
-- **No undo/redo and no session recovery.** A mistaken removal loses the
-  run of show for good; the file only ever holds the current one.
+- **No undo/redo.** A mistaken removal in the editor or the deck can be
+  recovered only from the `backups/` folder or by hand. One bundle a day is
+  kept, 14 days.
 
 The MyGo lifetime and identity rules, and the widget inventory this app
 was written against, are in

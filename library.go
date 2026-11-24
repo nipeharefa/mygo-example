@@ -29,6 +29,12 @@ func readLibrary(path string) (libraryFile, error) {
 	if err != nil {
 		return libraryFile{}, err
 	}
+	return decodeLibrary(data)
+}
+
+// decodeLibrary validates the bytes of a library, wherever they came from: a
+// file, or the library half of a backup.
+func decodeLibrary(data []byte) (libraryFile, error) {
 	var f libraryFile
 	if err := json.Unmarshal(data, &f); err != nil {
 		return libraryFile{}, fmt.Errorf("library: %w", err)
@@ -112,7 +118,11 @@ func (a *app) saveLibrary() error {
 	if path == "" {
 		return nil
 	}
-	return writeLibrary(path, libraryFile{Version: libraryVersion, Songs: a.songs})
+	if err := writeLibrary(path, libraryFile{Version: libraryVersion, Songs: a.songs}); err != nil {
+		return err
+	}
+	a.snapshotDaily()
+	return nil
 }
 
 // normalizeLibrary drops songs that cannot be addressed and pulls every size

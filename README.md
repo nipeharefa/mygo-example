@@ -55,9 +55,9 @@ are looking at). Moving the monitor never changes the room until you press
    monitor, skip the window altogether: turn on NDI instead, and OBS or
    NDI Video Monitor shows the stage while the console keeps the keyboard.
    The **Settings** page (Cmd/Ctrl+, or **Settings** in the **Account**
-   pane at the end of the bar) also holds the NDI switch, the output size
-   and the stream's own stats; the **Help** menu lists the shortcuts and
-   the NDI setup.
+   pane at the end of the bar) also holds the NDI switch, the output size,
+   the stream's own stats, and the backup and restore buttons; the **Help**
+   menu lists the shortcuts and the NDI setup.
 
 The console shortcuts are **←** / **→** for the monitor, **Enter** or
 **Cmd/Ctrl+Enter** to go live, and **B** for blackout. In the stage window **← → ↑ ↓** and
@@ -116,6 +116,24 @@ so a chorus can follow every verse without another copy of the song.
 
 The run of show keeps the words it was given: editing a slide later does not
 rewrite a slide already added. Add the song again to use the new words.
+
+## Backing up and moving songs
+
+Settings > Data keeps the work safe without a Save button.
+
+- On the first save of each day the app writes a copy of the songs and the
+  run of show into a `backups` folder in the app data directory; the last 14
+  days are kept.
+- **Back up…** writes one file, named for the day, wherever you choose. It
+  holds the songs and the run of show, and it is the file to copy to another
+  machine, a USB stick or a cloud folder.
+- **Restore…** reads such a file, or a copy of `library.json`, says how many
+  songs it holds, and asks before it replaces anything. The songs and the set
+  you have now are copied into `backups` first, so a wrong pick costs a few
+  seconds, not the library.
+
+The same folder holds `library.json`, the songs, and `show.json`, the run of
+show. Both are plain JSON, so they can be read and copied without the app.
 
 **Text size** is one number per song, in stage units at the 1280×720 design:
 40 is the built-in size and the slider spans 24 to 72. The editor's 16:9

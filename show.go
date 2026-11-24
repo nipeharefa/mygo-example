@@ -56,6 +56,12 @@ func readShow(path string) (showFile, error) {
 	if err != nil {
 		return showFile{}, err
 	}
+	return decodeShow(data)
+}
+
+// decodeShow validates the bytes of a run of show, wherever they came from: a
+// file, or the show half of a backup.
+func decodeShow(data []byte) (showFile, error) {
 	var f showFile
 	if err := json.Unmarshal(data, &f); err != nil {
 		return showFile{}, fmt.Errorf("show: %w", err)
@@ -99,6 +105,14 @@ func (a *app) loadShow() {
 		a.showNote = "The saved run of show could not be read, so it is not saved over."
 		return
 	}
+	a.applyShow(f)
+	a.showSaved = a.showBytes()
+	a.showNote = ""
+}
+
+// applyShow replaces the deck with a saved run of show: the cursor clamped,
+// empty or duplicate ids repaired, and the counter past every id in it.
+func (a *app) applyShow(f showFile) {
 	deck := make([]slide, 0, len(f.Slides))
 	seen := make(map[string]bool, len(f.Slides))
 	next := f.NextID
@@ -127,8 +141,6 @@ func (a *app) loadShow() {
 	a.preview, a.stage = f.Preview, f.Stage
 	a.clampSlides()
 	a.nextID = max(next, a.nextFreeSlideID())
-	a.showSaved = a.showBytes()
-	a.showNote = ""
 }
 
 // saveShow writes the run of show when it differs from what is on disk. It
@@ -150,6 +162,7 @@ func (a *app) saveShow() {
 	}
 	a.showSaved = data
 	a.showNote = ""
+	a.snapshotDaily()
 }
 
 // showBytes is the serialized form, used to tell whether anything changed.

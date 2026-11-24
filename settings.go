@@ -168,6 +168,7 @@ func (a *app) showSettings() {
 // showConsole leaves the Settings page for the run of show.
 func (a *app) showConsole() {
 	a.page = pageConsole
+	a.restoreWaiting = nil
 	a.changed()
 }
 
@@ -231,9 +232,36 @@ func (a *app) settingsBody(c *ui.Context) {
 				})
 
 				// Data
-				settingsCard(c, "Data", "What survives a restart.", func() {
-					ui.Text(c, "The run of show is saved and comes back at the next launch. The display and NDI preferences and the song library are saved in the app data directory.").
+				settingsCard(c, "Data", "What survives a restart, and how to keep it.", func() {
+					ui.Text(c, "The songs, the run of show and the preferences save as you work, in the app data directory. One copy of each day's work is kept automatically; a backup is one file you can copy to another machine.").
 						FontSize(textBody).TextColor(t.TextMuted)
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
+						ui.Button(c, "Back up…").Label("Back up songs and run of show").OnClick(a.backUpSongs)
+						ui.Button(c, "Restore…").Label("Restore from a backup").OnClick(a.chooseRestore)
+					})
+					if a.backupNote != "" {
+						color := t.TextMuted
+						if a.backupNoteErr {
+							color = t.Danger
+						}
+						ui.Text(c, a.backupNote).FontSize(textSmall).TextColor(color)
+					}
+					if r := a.restoreWaiting; r != nil {
+						ui.Column(c).Gap(8).Padding(12).Radius(8).Background(sunken(t)).Border(1, hairlines(t)).Children(func() {
+							ui.Text(c, fmt.Sprintf("Replace %s here with %s from %s?",
+								songCount(len(a.songs)), songCount(len(r.Library.Songs)), filepath.Base(r.Path))).
+								FontSize(textBody).FontWeight(600)
+							detail := "Your current songs and run of show are copied to the backups folder first."
+							if r.Show != nil {
+								detail = "The backup's run of show replaces the current one. " + detail
+							}
+							ui.Text(c, detail).FontSize(textSmall).TextColor(t.TextMuted)
+							ui.Row(c).Gap(8).Children(func() {
+								ui.Button(c, "Cancel").OnClick(a.cancelRestore)
+								ui.PrimaryButton(c, "Replace").OnClick(a.confirmRestore)
+							})
+						})
+					}
 					if a.settingsDir == "" {
 						ui.Text(c, "Preferences are not saved in this session.").FontSize(textBody).TextColor(t.TextMuted).SingleLine()
 					}

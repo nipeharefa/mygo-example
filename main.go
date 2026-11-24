@@ -66,6 +66,16 @@ type app struct {
 	showBlocked bool
 	showNote    string
 
+	// Backups: the day's snapshot is taken once, the file dialogs go
+	// through seams the tests answer, and the Settings page reads the note
+	// and the restore the operator is being asked about.
+	saveFile       func(mygo.SaveDialogOptions) (string, error)
+	openFile       func(mygo.OpenDialogOptions) ([]string, error)
+	backupDay      string
+	backupNote     string
+	backupNoteErr  bool
+	restoreWaiting *restorePlan
+
 	win  *mygo.Window
 	live *mygo.Window
 
@@ -192,6 +202,8 @@ func (a *app) signOut() {
 	a.editorTab = editorSlideTab
 	a.editorStatus, a.editorStatusErr = "", false
 	a.newSongOpen, a.pasteOpen, a.confirmRemoveSong = false, false, false
+	a.restoreWaiting = nil
+	a.backupNote, a.backupNoteErr = "", false
 }
 
 // clearAuthError hides a stale error as soon as either field changes.
